@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { forwardRef, useRef, type ForwardedRef } from 'react'
 import type { Group } from 'three'
 import { useFrame } from '@react-three/fiber'
 import { BoatModel } from './BoatModel'
@@ -8,7 +8,12 @@ import { NavigationLights } from './NavigationLights'
 import { useSnapshot } from '../store'
 import { HULL_SAMPLES, HULL_WATERLINE_Y, waterSurfaceY } from './waves'
 
-export function Boat() {
+function assignRef(node: Group | null, ref: ForwardedRef<Group>) {
+  if (typeof ref === 'function') ref(node)
+  else if (ref) ref.current = node
+}
+
+export const Boat = forwardRef<Group>(function Boat(_props, ref) {
   const snap = useSnapshot()
   const groupRef = useRef<Group>(null)
 
@@ -32,7 +37,12 @@ export function Boat() {
   })
 
   return (
-    <group ref={groupRef}>
+    <group
+      ref={(node) => {
+        groupRef.current = node
+        assignRef(node, ref)
+      }}
+    >
       <BoatModel />
 
       {snap.loads.cabinLights > 0 && (
@@ -44,4 +54,4 @@ export function Boat() {
       <Hotspots />
     </group>
   )
-}
+})

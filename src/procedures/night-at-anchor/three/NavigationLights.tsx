@@ -6,8 +6,8 @@ import { DUSK_TOD, DAWN_TOD } from '../sim/constants'
 
 /** COLREGs sidelight / stern-light colours. */
 const COLORS = {
-  port: '#28e865',
-  starboard: '#ff3d3d',
+  port: '#ff3d3d',
+  starboard: '#28e865',
   stern: '#fff6e8',
   anchor: '#fff3d6',
 } as const
@@ -23,7 +23,7 @@ export const NAV_LIGHT_POSITIONS = {
   anchor: [0.53, 16.0, 0] as const,
 }
 
-function isNightMinute(minute: number): boolean {
+export function isNightMinute(minute: number): boolean {
   const tod = minuteToTod(minute)
   return tod >= DUSK_TOD || tod < DAWN_TOD
 }
@@ -108,7 +108,7 @@ function SideLight({
   )
 }
 
-/** Port (green), starboard (red), stern (white) + masthead anchor light — night only. */
+/** Port (red), starboard (green), stern (white) + masthead anchor light — night only. */
 export function NavigationLights() {
   const snap = useSnapshot()
   const anchorEnabled = useSim((s) => s.config.devicesEnabled.anchorLight)
@@ -119,14 +119,14 @@ export function NavigationLights() {
 
   return (
     <group>
-      {/* Green — port / lewa burta (−Z) */}
+      {/* Red — port / lewa burta (−Z) */}
       <SideLight
         position={NAV_LIGHT_POSITIONS.port}
         color={COLORS.port}
         spotRotation={[Math.PI / 2, 0, 0]}
         fixtureRotation={[0, Math.PI / 2, 0]}
       />
-      {/* Red — starboard / prawa burta (+Z) */}
+      {/* Green — starboard / prawa burta (+Z) */}
       <SideLight
         position={NAV_LIGHT_POSITIONS.starboard}
         color={COLORS.starboard}

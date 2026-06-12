@@ -2,9 +2,12 @@ import { Suspense, useMemo, useRef } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Stars, Environment } from '@react-three/drei'
 import * as THREE from 'three'
+import type { Group } from 'three'
 import { Boat } from './Boat'
 import { Water } from './Water'
+import { SkyGradient } from './SkyGradient'
 import { CameraControls } from './CameraControls'
+import { applySkyColors } from './skyColors'
 import { useSim, useSnapshot } from '../store'
 import { minuteToTod } from '../sim/engine'
 import { SUNRISE_TOD, SUNSET_TOD } from '../sim/constants'
@@ -16,29 +19,36 @@ function daylightFactor(minute: number): number {
   return Math.sin((Math.PI * (tod - SUNRISE_TOD)) / (SUNSET_TOD - SUNRISE_TOD))
 }
 
-const NIGHT_BG = new THREE.Color('#0A141F')
-const DAY_BG = new THREE.Color('#274d66')
 const NIGHT_SUN = new THREE.Color('#9db8d4')
 const DAY_SUN = new THREE.Color('#ffe9c4')
+const SUN_DIR = new THREE.Vector3(18, 28, 26).normalize()
 
 function SkyAndLights({ daylight }: { daylight: number }) {
   const sunRef = useRef<THREE.DirectionalLight>(null)
   const ambRef = useRef<THREE.AmbientLight>(null)
-  const bg = useMemo(() => NIGHT_BG.clone(), [])
+  const horizon = useMemo(() => new THREE.Color(), [])
+  const zenithScratch = useMemo(() => new THREE.Color(), [])
 
   useFrame((state) => {
-    bg.copy(NIGHT_BG).lerp(DAY_BG, daylight * 0.85)
-    ;(state.scene.background as THREE.Color | null)?.copy?.(bg)
-    if (!state.scene.background) state.scene.background = bg.clone()
+    applySkyColors(daylight, horizon, zenithScratch)
+    if (state.scene.fog instanceof THREE.Fog) {
+      state.scene.fog.color.copy(horizon)
+      state.scene.fog.near = THREE.MathUtils.lerp(55, 35, daylight)
+      state.scene.fog.far = THREE.MathUtils.lerp(150, 175, daylight)
+    }
     if (sunRef.current) {
-      sunRef.current.intensity = 2.6 + daylight * 2.0
+      sunRef.current.intensity = 2.6 + daylight * 2.4
       sunRef.current.color.copy(NIGHT_SUN).lerp(DAY_SUN, daylight)
     }
-    if (ambRef.current) ambRef.current.intensity = 0.75 + daylight * 0.55
+    if (ambRef.current) {
+      ambRef.current.intensity = 0.75 + daylight * 0.85
+      ambRef.current.color.set('#8da5bb').lerp(new THREE.Color('#b8dff5'), daylight * 0.85)
+    }
   })
 
   return (
     <>
+      <SkyGradient daylight={daylight} />
       <ambientLight ref={ambRef} intensity={0.75} color="#8da5bb" />
       {/* key light from camera side */}
       <directionalLight ref={sunRef} position={[18, 28, 26]} intensity={2.6} color="#9db8d4" />
@@ -62,6 +72,7 @@ export function Scene3D() {
   const snap = useSnapshot()
   const select = useSim((s) => s.select)
   const daylight = daylightFactor(snap.minute)
+  const boatRef = useRef<Group>(null)
 
   return (
     <Canvas
@@ -72,11 +83,11 @@ export function Scene3D() {
       style={{ touchAction: 'none' }}
     >
       <Suspense fallback={null}>
-        <Environment preset="city" environmentIntensity={0.25 + daylight * 0.45} />
+        <Environment preset="city" environmentIntensity={0.4 + daylight * 0.85} />
         <SkyAndLights daylight={daylight} />
         <fog attach="fog" args={['#0A141F', 55, 150]} />
-        <Boat />
-        <Water daylight={daylight} />
+        <Boat ref={boatRef} />
+        <Water daylight={daylight} sunDir={SUN_DIR} boatRef={boatRef} />
         <CameraControls />
       </Suspense>
     </Canvas>
