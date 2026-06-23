@@ -62,6 +62,22 @@
   flex-shrink: 0;
 }
 
+.naa-header__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: var(--header-bar-h);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  transition: color 0.15s, background 0.15s;
+}
+
+.naa-header__back:hover {
+  color: var(--in);
+  background: rgba(95, 212, 196, 0.08);
+}
+
 .naa-header .pill {
   height: var(--header-bar-h);
   padding: 2px;

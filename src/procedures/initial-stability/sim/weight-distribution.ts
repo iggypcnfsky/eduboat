@@ -1,0 +1,117 @@
+import type { HullParams, HullPresetId, KeelBallastId, SimConfig } from './types'
+import { RHO_SEAWATER } from './types'
+import { ballastBodyPosition } from './keel-config'
+import { designReferenceAreaForConfig } from './keel-config'
+
+export interface CenterOfGravityResult {
+  gX: number
+  gZ: number
+  totalMassKg: number
+  displacementKg: number
+}
+
+export const DEFAULT_VESSEL_LENGTH_M = 12
+
+/** Maximum total boat mass exposed in controls (30 tonnes). */
+export const MAX_TOTAL_BOAT_MASS_KG = 30_000
+
+export function clampTotalBoatMassKg(kg: number): number {
+  return Math.max(0, Math.min(MAX_TOTAL_BOAT_MASS_KG, kg))
+}
+
+export function displacementMassKg(submergedArea: number): number {
+  return RHO_SEAWATER * submergedArea
+}
+
+/** Strip-model mass (kg/m) from total boat mass and length. */
+export function linearMassKgPerM(totalBoatMassKg: number, vesselLengthM: number): number {
+  return totalBoatMassKg / Math.max(vesselLengthM, 0.5)
+}
+
+/** Per-meter loads for the 2D cross-section solver. */
+export function linearLoadsFromConfig(config: SimConfig): {
+  linearTotalKg: number
+  linearKeelKg: number
+} {
+  const len = Math.max(config.vesselLengthM, 0.5)
+  return {
+    linearTotalKg: config.totalBoatMassKg / len,
+    linearKeelKg: config.keelBallastKg / len,
+  }
+}
+
+/** Default loaded mass at design waterline (kg/m). */
+export function defaultTotalMassKg(referenceArea: number): number {
+  return displacementMassKg(referenceArea)
+}
+
+/** Design displacement for the whole boat at reference draft (kg). */
+export function defaultTotalBoatMassKg(config: SimConfig): number {
+  const refArea = designReferenceAreaForConfig(config)
+  return defaultTotalMassKg(refArea) * Math.max(config.vesselLengthM, 0.5)
+}
+
+/** Typical keel ballast mass as a fraction of design displacement (kg/m). */
+export function defaultKeelBallastMassKg(referenceArea: number, keelId: KeelBallastId): number {
+  if (keelId === 'none') return 0
+  return displacementMassKg(referenceArea) * 0.18
+}
+
+/** Typical total keel ballast mass (kg). */
+export function defaultKeelBallastKg(config: SimConfig, keelId: KeelBallastId = config.keelBallastId): number {
+  const refArea = designReferenceAreaForConfig(config)
+  return defaultKeelBallastMassKg(refArea, keelId) * Math.max(config.vesselLengthM, 0.5)
+}
+
+/** Lightship / hull structure centroid (body frame, from K). */
+export function hullStructureKg(params: HullParams): number {
+  const { draft, freeboard } = params
+  const deckZ = draft + freeboard
+  if (deckZ < 1e-6) return 0
+  const belowWlCg = draft * 0.42
+  const topsideCg = draft + freeboard * 0.58
+  const belowWlMassFrac = 0.55 + 0.25 * (draft / deckZ)
+  return belowWlMassFrac * belowWlCg + (1 - belowWlMassFrac) * topsideCg
+}
+
+function ballastKgPosition(
+  presetId: HullPresetId,
+  params: HullParams,
+  keelId: KeelBallastId,
+): number {
+  const id = keelId === 'none' ? 'internal' : keelId
+  return ballastBodyPosition(params, presetId, id).z
+}
+
+/**
+ * Center of gravity from strip-model mass (kg/m), optional keel ballast (kg/m), and layout.
+ * Keel appendage geometry does not lower G unless keel ballast mass is added.
+ */
+export function computeCenterOfGravity(
+  presetId: HullPresetId,
+  params: HullParams,
+  keelId: KeelBallastId,
+  referenceArea: number,
+  totalMassKg: number,
+  keelBallastMassKg: number,
+): CenterOfGravityResult {
+  const displacementKg = displacementMassKg(referenceArea)
+  const keelMass = Math.min(Math.max(0, keelBallastMassKg), totalMassKg)
+  const hullMass = Math.max(0, totalMassKg - keelMass)
+  const kgHull = hullStructureKg(params)
+
+  let gZ: number
+  if (keelMass < 1e-3) {
+    gZ = kgHull
+  } else {
+    const kgBallast = ballastKgPosition(presetId, params, keelId)
+    gZ = (hullMass * kgHull + keelMass * kgBallast) / totalMassKg
+  }
+
+  return {
+    gX: 0,
+    gZ,
+    totalMassKg,
+    displacementKg,
+  }
+}
