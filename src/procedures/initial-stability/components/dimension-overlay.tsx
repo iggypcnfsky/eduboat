@@ -2,6 +2,18 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { bodyToEarth } from '../sim/geometry'
 import { customHullKeelPartIndex, designWaterlineZ } from '../sim/keel-config'
 import { isCustomHullPreset, isMultiHullPreset } from '../sim/hull-presets'
+import {
+  bodyToExportPoint,
+  bodyToExportY,
+  computeExportViewBox,
+  customHullClosedPathD,
+  deriveHullParams,
+  exportPointToBody,
+  exportSvgDasharray,
+  exportSvgLength,
+  sampleCustomHullOutline,
+  type CustomHullDesign,
+} from '../sim/custom-hull'
 import type { SimConfig, Vec2 } from '../sim/types'
 
 const DIM_COLOR = '#8faec0'
@@ -708,4 +720,146 @@ export function DimensionLabels({
       })}
     </g>
   )
+}
+
+type ExportPt = { x: number; y: number }
+
+function exportPerp(da: ExportPt, db: ExportPt): { px: number; py: number } {
+  const dx = db.x - da.x
+  const dy = db.y - da.y
+  const len = Math.hypot(dx, dy) || 1
+  return { px: -dy / len, py: dx / len }
+}
+
+function exportTickSegment(center: ExportPt, perp: { px: number; py: number }, half: number): string {
+  return `${(center.x - perp.px * half).toFixed(3)},${(center.y - perp.py * half).toFixed(3)} ${(center.x + perp.px * half).toFixed(3)},${(center.y + perp.py * half).toFixed(3)}`
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Body-frame attach points for dimension export (same geometry as on-screen). */
+export function dimensionAttachBodyPoints(spec: DimensionSpec): { fa: Vec2; fb: Vec2; da: Vec2; db: Vec2 } {
+  return dimensionAttachPoints(spec)
+}
+
+/** Collect body-frame points for export viewBox padding. */
+export function dimensionSpecsBodyExtentPoints(specs: DimensionSpec[], beam: number): Vec2[] {
+  const fontSize = exportSvgLength(Math.max(0.08, beam * 0.045))
+  const labelOffset = fontSize * 1.75
+  const pts: Vec2[] = []
+  for (const spec of specs) {
+    const { fa, fb, da, db } = dimensionAttachPoints(spec)
+    pts.push(fa, fb, da, db)
+    const ea = bodyToExportPoint(da)
+    const eb = bodyToExportPoint(db)
+    const perp = exportPerp(ea, eb)
+    const text = `${spec.label} ${spec.valueM.toFixed(2)} m`
+    const padX = fontSize * 0.5
+    const padY = fontSize * 0.25
+    const estW = text.length * fontSize * 0.55
+    const estH = fontSize + padY * 2
+    const lx = (ea.x + eb.x) / 2 + perp.px * labelOffset
+    const ly = (ea.y + eb.y) / 2 + perp.py * labelOffset
+    pts.push(exportPointToBody({ x: lx - estW / 2 - padX, y: ly - estH / 2 }))
+    pts.push(exportPointToBody({ x: lx + estW / 2 + padX, y: ly + estH / 2 }))
+  }
+  return pts
+}
+
+/** Dimension callouts as SVG markup in export coordinates (20× body meters). */
+export function dimensionSpecsToSvgMarkup(specs: DimensionSpec[], beam: number): string {
+  if (specs.length === 0) return ''
+  const fontSize = exportSvgLength(Math.max(0.08, beam * 0.045))
+  const tickHalf = exportSvgLength(Math.max(0.03, beam * 0.02))
+  const labelOffset = fontSize * 1.75
+  const padX = fontSize * 0.5
+  const padY = fontSize * 0.25
+  const pillRx = fontSize * 0.5
+  const thinStroke = exportSvgLength(0.02).toFixed(3)
+  const mainStroke = exportSvgLength(0.025).toFixed(3)
+  const pillStroke = exportSvgLength(0.015).toFixed(3)
+  const parts: string[] = []
+
+  for (const spec of specs) {
+    const { fa, fb, da, db } = dimensionAttachPoints(spec)
+    const efa = bodyToExportPoint(fa)
+    const efb = bodyToExportPoint(fb)
+    const eda = bodyToExportPoint(da)
+    const edb = bodyToExportPoint(db)
+    const perp = exportPerp(eda, edb)
+    const stroke = spec.color ?? DIM_COLOR
+    const dash = spec.strokeDasharray
+      ? ` stroke-dasharray="${exportSvgDasharray(spec.strokeDasharray)}"`
+      : ''
+    const text = `${spec.label} ${spec.valueM.toFixed(2)} m`
+    const estW = text.length * fontSize * 0.55
+    const lx = (eda.x + edb.x) / 2 + perp.px * labelOffset
+    const ly = (eda.y + edb.y) / 2 + perp.py * labelOffset
+
+    parts.push(`<g>`)
+    parts.push(
+      `<line x1="${efa.x.toFixed(3)}" y1="${efa.y.toFixed(3)}" x2="${eda.x.toFixed(3)}" y2="${eda.y.toFixed(3)}" stroke="${stroke}" stroke-width="${thinStroke}" stroke-opacity="0.55"${dash}/>`,
+    )
+    parts.push(
+      `<line x1="${efb.x.toFixed(3)}" y1="${efb.y.toFixed(3)}" x2="${edb.x.toFixed(3)}" y2="${edb.y.toFixed(3)}" stroke="${stroke}" stroke-width="${thinStroke}" stroke-opacity="0.55"${dash}/>`,
+    )
+    parts.push(
+      `<line x1="${eda.x.toFixed(3)}" y1="${eda.y.toFixed(3)}" x2="${edb.x.toFixed(3)}" y2="${edb.y.toFixed(3)}" stroke="${stroke}" stroke-width="${mainStroke}" stroke-opacity="0.85"${dash}/>`,
+    )
+    parts.push(
+      `<polyline points="${exportTickSegment(eda, perp, tickHalf)}" fill="none" stroke="${stroke}" stroke-width="${mainStroke}" stroke-opacity="0.85"${dash}/>`,
+    )
+    parts.push(
+      `<polyline points="${exportTickSegment(edb, perp, tickHalf)}" fill="none" stroke="${stroke}" stroke-width="${mainStroke}" stroke-opacity="0.85"${dash}/>`,
+    )
+    parts.push(
+      `<rect x="${(lx - estW / 2 - padX).toFixed(3)}" y="${(ly - fontSize / 2 - padY).toFixed(3)}" width="${(estW + padX * 2).toFixed(3)}" height="${(fontSize + padY * 2).toFixed(3)}" rx="${pillRx.toFixed(3)}" ry="${pillRx.toFixed(3)}" fill="rgba(8,14,22,0.88)" stroke="${stroke}" stroke-opacity="0.4" stroke-width="${pillStroke}"/>`,
+    )
+    parts.push(
+      `<text x="${lx.toFixed(3)}" y="${ly.toFixed(3)}" fill="${stroke}" font-size="${fontSize.toFixed(3)}" font-weight="600" text-anchor="middle" dominant-baseline="middle">${escapeXml(text)}</text>`,
+    )
+    parts.push(`</g>`)
+  }
+
+  return parts.join('')
+}
+
+/** Annotated design SVG: hull + design waterline + dimension callouts. */
+export function exportCustomHullDesignSvg(design: CustomHullDesign): string {
+  const pathD = customHullClosedPathD(design)
+  if (!pathD) return ''
+
+  const outline = sampleCustomHullOutline(design)
+  const params = deriveHullParams(outline, design.designWaterlineZ)
+  const specs = computeEditorDimensionSpecs(
+    outline,
+    design.designWaterlineZ,
+    params.beam,
+    params.draft,
+    params.freeboard,
+  )
+  const dimExtents = dimensionSpecsBodyExtentPoints(specs, params.beam)
+  const vb = computeExportViewBox(design, dimExtents)
+  const viewBox = `${vb.minX.toFixed(3)} ${vb.minY.toFixed(3)} ${vb.width.toFixed(3)} ${vb.height.toFixed(3)}`
+  const title = design.name ? `<title>${escapeXml(design.name)}</title>` : ''
+  const wlY = bodyToExportY(design.designWaterlineZ)
+  const wlHalf = exportSvgLength(params.beam / 2 + 0.15)
+  const hullStroke = exportSvgLength(0.03).toFixed(3)
+  const wlStroke = exportSvgLength(0.025).toFixed(3)
+  const wlDash = exportSvgDasharray('0.12 0.08')
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
+    title,
+    `<path d="${pathD}" fill="rgba(95,212,196,0.12)" stroke="#5fd4c4" stroke-width="${hullStroke}"/>`,
+    `<line x1="${(-wlHalf).toFixed(3)}" y1="${wlY.toFixed(3)}" x2="${wlHalf.toFixed(3)}" y2="${wlY.toFixed(3)}" stroke="#48c8c0" stroke-width="${wlStroke}" stroke-dasharray="${wlDash}"/>`,
+    dimensionSpecsToSvgMarkup(specs, params.beam),
+    `</svg>`,
+  ].join('')
 }

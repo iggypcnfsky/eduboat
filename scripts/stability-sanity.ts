@@ -14,8 +14,11 @@ import {
   sampleCustomHullOutline,
   applyCustomHullKeelHeight,
   customHullKeelHeight,
+  exportCustomHullSvg,
+  createDefaultCustomHullDesign,
 } from '../src/procedures/initial-stability/sim/custom-hull'
 import type { CustomHullDesign } from '../src/procedures/initial-stability/sim/custom-hull'
+import { exportCustomHullDesignSvg } from '../src/procedures/initial-stability/components/dimension-overlay'
 import {
   computeCenterOfGravity,
   DEFAULT_VESSEL_LENGTH_M,
@@ -315,6 +318,27 @@ function finConfig(partial: Partial<SimConfig> = {}): SimConfig {
     'Design freeboard line reaches deck geometry',
     freeboardSpec && Math.abs(freeboardSpec.bBody.z - deckZ) < 0.05,
     `deck line z=${freeboardSpec?.bBody.z?.toFixed(3)} hull deck=${deckZ.toFixed(3)}`,
+  )
+}
+
+// 11. Custom hull SVG export for clipboard
+{
+  const design = createDefaultCustomHullDesign('Export test')
+  const hullSvg = exportCustomHullSvg(design)
+  assert(
+    'Hull SVG has xmlns and path',
+    hullSvg.includes('xmlns="http://www.w3.org/2000/svg"') &&
+      hullSvg.includes('<path d="') &&
+      hullSvg.includes('</svg>'),
+  )
+  const viewBoxMatch = hullSvg.match(/viewBox="([^"]+)"/)
+  assert('Hull SVG viewBox is valid', viewBoxMatch !== null && viewBoxMatch[1].split(' ').length === 4)
+
+  const designSvg = exportCustomHullDesignSvg(design)
+  assert('Design SVG has waterline', designSvg.includes('stroke-dasharray="2.400 1.600"'))
+  assert(
+    'Design SVG has dimension labels',
+    designSvg.includes('Beam') && designSvg.includes('<text'),
   )
 }
 

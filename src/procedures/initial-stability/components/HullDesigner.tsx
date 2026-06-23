@@ -14,6 +14,8 @@ import {
   Ruler,
   Anchor,
   Ship,
+  ClipboardCopy,
+  ClipboardList,
   type LucideIcon,
 } from 'lucide-react'
 import { useCustomHullStore } from '../customHullStore'
@@ -36,6 +38,7 @@ import {
   isNodeHandlesLinked,
   linkNodeHandles,
   nodeHasBezierHandles,
+  exportCustomHullSvg,
   type CubicBezierNode,
   type CustomHullDesign,
 } from '../sim/custom-hull'
@@ -47,6 +50,7 @@ import {
   DESIGN_DIM_MUTED_OPACITY,
   DimensionLabels,
   DimensionLines,
+  exportCustomHullDesignSvg,
 } from './dimension-overlay'
 
 const SVG_W = 640
@@ -578,6 +582,8 @@ export function HullDesigner() {
   const [hoverHandle, setHoverHandle] = useState<HoverHandle | null>(null)
   const [insertHover, setInsertHover] = useState<InsertHover | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [hullCopied, setHullCopied] = useState(false)
+  const [designCopied, setDesignCopied] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [svgSize, setSvgSize] = useState({ w: SVG_W, h: SVG_H })
@@ -1232,6 +1238,57 @@ export function HullDesigner() {
     closeDesigner()
   }
 
+  const buildDesignForExport = useCallback((): CustomHullDesign => {
+    return {
+      id: designId,
+      name: name.trim() || 'Hull',
+      nodes: cloneNodes(nodes),
+      designWaterlineZ,
+      createdAt: initial.createdAt,
+      updatedAt: Date.now(),
+    }
+  }, [designId, name, nodes, designWaterlineZ, initial.createdAt])
+
+  const copySvgToClipboard = useCallback(
+    async (svg: string, which: 'hull' | 'design') => {
+      if (!svg) {
+        setError('Nothing to export — draw a hull first')
+        return
+      }
+      try {
+        await navigator.clipboard.writeText(svg)
+        setError(null)
+        if (which === 'hull') {
+          setHullCopied(true)
+          setDesignCopied(false)
+        } else {
+          setDesignCopied(true)
+          setHullCopied(false)
+        }
+      } catch {
+        setError('Could not copy SVG to clipboard')
+      }
+    },
+    [],
+  )
+
+  const handleCopyHullSvg = useCallback(() => {
+    void copySvgToClipboard(exportCustomHullSvg(buildDesignForExport()), 'hull')
+  }, [buildDesignForExport, copySvgToClipboard])
+
+  const handleCopyDesignSvg = useCallback(() => {
+    void copySvgToClipboard(exportCustomHullDesignSvg(buildDesignForExport()), 'design')
+  }, [buildDesignForExport, copySvgToClipboard])
+
+  useEffect(() => {
+    if (!hullCopied && !designCopied) return
+    const t = window.setTimeout(() => {
+      setHullCopied(false)
+      setDesignCopied(false)
+    }, 2000)
+    return () => window.clearTimeout(t)
+  }, [hullCopied, designCopied])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return
@@ -1846,6 +1903,25 @@ export function HullDesigner() {
             aria-label="Toggle dimensions"
           >
             <Ruler size={14} />
+          </button>
+          <span className="is-diagram__toolbar-sep" />
+          <button
+            type="button"
+            className={`is-diagram__zoom-btn${hullCopied ? ' is-diagram__zoom-btn--active' : ''}`}
+            onClick={handleCopyHullSvg}
+            title="Copy hull SVG"
+            aria-label="Copy hull SVG"
+          >
+            <ClipboardCopy size={14} />
+          </button>
+          <button
+            type="button"
+            className={`is-diagram__zoom-btn${designCopied ? ' is-diagram__zoom-btn--active' : ''}`}
+            onClick={handleCopyDesignSvg}
+            title="Copy design SVG"
+            aria-label="Copy design SVG"
+          >
+            <ClipboardList size={14} />
           </button>
         </div>
       </div>

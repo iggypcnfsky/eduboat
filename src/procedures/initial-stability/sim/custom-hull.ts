@@ -467,7 +467,7 @@ export function applyLinkedHandlePatch(
   return { handleIn: handle, handleOut: mirrorHandle(handle) }
 }
 
-/** SVG path d for cubic Bézier starboard half (for designer preview). */
+/** SVG path d for cubic Bézier starboard half (body frame x/z). */
 export function starboardBezierPathD(nodes: CubicBezierNode[]): string {
   if (nodes.length === 0) return ''
   let d = `M ${nodes[0].anchor.x.toFixed(3)} ${nodes[0].anchor.z.toFixed(3)}`
@@ -479,4 +479,123 @@ export function starboardBezierPathD(nodes: CubicBezierNode[]): string {
     d += ` C ${c1.x.toFixed(3)} ${c1.z.toFixed(3)}, ${c2.x.toFixed(3)} ${c2.z.toFixed(3)}, ${b.x.toFixed(3)} ${b.z.toFixed(3)}`
   }
   return d
+}
+
+/** SVG export scale: body-frame meters → SVG user units (keel-down). */
+export const CUSTOM_HULL_SVG_EXPORT_SCALE = 20
+
+export function exportSvgLength(meters: number): number {
+  return meters * CUSTOM_HULL_SVG_EXPORT_SCALE
+}
+
+/** Export SVG y: keel-down orientation (matches on-screen editor). */
+export function bodyToExportY(z: number): number {
+  return exportSvgLength(-z)
+}
+
+export function bodyToExportPoint(p: Vec2): { x: number; y: number } {
+  return { x: exportSvgLength(p.x), y: bodyToExportY(p.z) }
+}
+
+export function exportPointToBody(e: { x: number; y: number }): Vec2 {
+  return { x: e.x / CUSTOM_HULL_SVG_EXPORT_SCALE, z: -e.y / CUSTOM_HULL_SVG_EXPORT_SCALE }
+}
+
+export function exportSvgDasharray(bodyDash: string): string {
+  return bodyDash
+    .split(/[\s,]+/)
+    .filter(Boolean)
+    .map((n) => exportSvgLength(Number(n)).toFixed(3))
+    .join(' ')
+}
+
+function exportCoord(p: Vec2): string {
+  const e = bodyToExportPoint(p)
+  return `${e.x.toFixed(3)} ${e.y.toFixed(3)}`
+}
+
+function starboardBezierPathDExport(nodes: CubicBezierNode[]): string {
+  if (nodes.length === 0) return ''
+  let d = `M ${exportCoord(nodes[0].anchor)}`
+  for (let i = 0; i < nodes.length - 1; i++) {
+    const a = nodes[i].anchor
+    const b = nodes[i + 1].anchor
+    const c1 = { x: a.x + nodes[i].handleOut.x, z: a.z + nodes[i].handleOut.z }
+    const c2 = { x: b.x + nodes[i + 1].handleIn.x, z: b.z + nodes[i + 1].handleIn.z }
+    d += ` C ${exportCoord(c1)}, ${exportCoord(c2)}, ${exportCoord(b)}`
+  }
+  return d
+}
+
+/** Mirrored port half, reversed segment order (body frame). */
+export function portBezierPathD(nodes: CubicBezierNode[]): string {
+  if (nodes.length < 2) return ''
+  let d = ''
+  for (let i = nodes.length - 2; i >= 0; i--) {
+    const a = nodes[i].anchor
+    const b = nodes[i + 1].anchor
+    const c1 = { x: a.x + nodes[i].handleOut.x, z: a.z + nodes[i].handleOut.z }
+    const c2 = { x: b.x + nodes[i + 1].handleIn.x, z: b.z + nodes[i + 1].handleIn.z }
+    const mc2 = { x: -c2.x, z: c2.z }
+    const mc1 = { x: -c1.x, z: c1.z }
+    const ma = { x: -a.x, z: a.z }
+    d += ` C ${exportCoord(mc2)}, ${exportCoord(mc1)}, ${exportCoord(ma)}`
+  }
+  return d
+}
+
+/** Closed hull outline path d in export coordinates. */
+export function customHullClosedPathD(design: CustomHullDesign): string {
+  const { nodes } = design
+  if (nodes.length === 0) return ''
+  return `${starboardBezierPathDExport(nodes)}${portBezierPathD(nodes)} Z`
+}
+
+export type ExportViewBox = { minX: number; minY: number; width: number; height: number }
+
+export function computeExportViewBox(
+  design: CustomHullDesign,
+  extraBodyPoints: Vec2[] = [],
+  paddingM = 0.1,
+): ExportViewBox {
+  const outline = sampleCustomHullOutline(design, 8)
+  const padding = exportSvgLength(paddingM)
+  const pts = [...outline, ...extraBodyPoints].map(bodyToExportPoint)
+  if (pts.length === 0) {
+    const p = exportSvgLength(1)
+    return { minX: -p, minY: -p, width: p * 2, height: p * 2 }
+  }
+  const xs = pts.map((p) => p.x)
+  const ys = pts.map((p) => p.y)
+  const minX = Math.min(...xs) - padding
+  const maxX = Math.max(...xs) + padding
+  const minY = Math.min(...ys) - padding
+  const maxY = Math.max(...ys) + padding
+  return { minX, minY, width: maxX - minX, height: maxY - minY }
+}
+
+function svgViewBoxAttr(vb: ExportViewBox): string {
+  return `${vb.minX.toFixed(3)} ${vb.minY.toFixed(3)} ${vb.width.toFixed(3)} ${vb.height.toFixed(3)}`
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/** Minimal SVG: closed hull outline only (meters, keel down). */
+export function exportCustomHullSvg(design: CustomHullDesign): string {
+  const pathD = customHullClosedPathD(design)
+  if (!pathD) return ''
+  const vb = computeExportViewBox(design)
+  const title = design.name ? `<title>${escapeXml(design.name)}</title>` : ''
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${svgViewBoxAttr(vb)}">`,
+    title,
+    `<path d="${pathD}" fill="rgba(95,212,196,0.12)" stroke="#5fd4c4" stroke-width="${exportSvgLength(0.03).toFixed(3)}"/>`,
+    `</svg>`,
+  ].join('')
 }
