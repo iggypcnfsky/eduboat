@@ -10,10 +10,26 @@ import {
 } from '../sim/hull-templates'
 import {
   MAX_TOTAL_BOAT_MASS_KG,
+  MIN_VESSEL_LENGTH_M,
+  MAX_VESSEL_LENGTH_M,
   defaultTotalBoatMassKg,
 } from '../sim/weight-distribution'
 import { waveFrequencyHz, waveLengthDeepWater } from '../sim/roll-dynamics'
 import type { HullParams, HullPresetId, KeelBallastId } from '../sim/types'
+import { FieldLabel, HelpPopover } from './HelpPopover'
+import { MULTIHULL_PARAM_HELP, PARAM_HELP } from './control-help'
+
+function resolveParamHelp(
+  key: keyof HullParams,
+  presetId: HullPresetId,
+  fallbackLabel: string,
+): { title: string; text: string } {
+  if (isMultiHullPreset(presetId)) {
+    const mh = MULTIHULL_PARAM_HELP[key]?.[presetId as 'catamaran' | 'trimaran']
+    if (mh) return mh
+  }
+  return PARAM_HELP[key] ?? { title: fallbackLabel, text: 'Hull geometry parameter for this cross-section.' }
+}
 
 export function ControlsPanel() {
   const config = useStability((s) => s.config)
@@ -59,10 +75,12 @@ export function ControlsPanel() {
 
   const fmtTonnes = (kg: number) => `${(kg / 1000).toFixed(2)} t`
 
+  const keelBallastPct = ((config.keelBallastKg / Math.max(config.totalBoatMassKg, 1)) * 100).toFixed(0)
+
   return (
     <div className="is-panel-inner">
       <label className="is-field">
-        <span className="is-field__label">Hull type</span>
+        <FieldLabel label="Hull type" helpTitle="Hull type" help={hullType.description} />
         <select
           className="is-select"
           value={config.presetId}
@@ -74,11 +92,18 @@ export function ControlsPanel() {
             </option>
           ))}
         </select>
-        <span className="is-field__hint">{hullType.description}</span>
       </label>
 
       <label className="is-field">
-        <span className="is-field__label">Boat template</span>
+        <FieldLabel
+          label="Boat template"
+          helpTitle="Boat template"
+          help={
+            activeTemplate
+              ? `${activeTemplate.description} Applied to ${hullType.title} geometry.`
+              : 'Parameters were changed manually — pick a template to load published dimensions.'
+          }
+        />
         <select
           className="is-select"
           value={templateSelectValue}
@@ -97,17 +122,19 @@ export function ControlsPanel() {
             <option value={CUSTOM_TEMPLATE_ID}>Custom (edited)</option>
           )}
         </select>
-        <span className="is-field__hint">
-          {activeTemplate
-            ? `${activeTemplate.description} Applied to ${hullType.title} geometry.`
-            : 'Parameters were changed manually — pick a template to load published dimensions.'}
-        </span>
       </label>
 
       <div className="is-controls-section">
-        <h4 className="is-controls-section__title">Keel &amp; ballast type</h4>
+        <h4 className="is-controls-section__title is-controls-section__title--row">
+          <span>Keel &amp; ballast type</span>
+          <HelpPopover title="Keel &amp; ballast">
+            Appendage shape and dense ballast mass low in the hull. Geometry alone does not lower G — you
+            must add keel ballast mass when a keel type is selected.
+          </HelpPopover>
+        </h4>
+
         <label className="is-field">
-          <span className="is-field__label">Appendage</span>
+          <FieldLabel label="Appendage" helpTitle="Appendage" help={keelOption.description} />
           <select
             className="is-select"
             value={config.keelBallastId}
@@ -119,13 +146,22 @@ export function ControlsPanel() {
               </option>
             ))}
           </select>
-          <span className="is-field__hint">{keelOption.description}</span>
         </label>
 
         <label className="is-field">
-          <span className="is-field__label">
-            Keel ballast: {config.keelBallastKg.toFixed(0)} kg ({fmtTonnes(config.keelBallastKg)})
-          </span>
+          <FieldLabel
+            label={
+              <>
+                Keel ballast: {config.keelBallastKg.toFixed(0)} kg ({fmtTonnes(config.keelBallastKg)})
+              </>
+            }
+            helpTitle="Keel ballast"
+            help={
+              config.keelBallastId === 'none'
+                ? 'Select a keel type to add ballast mass — appendage shape alone does not lower G.'
+                : `Dense mass low in the ${keelOption.title.toLowerCase()} — lowers KG (${keelBallastPct}% of total weight).`
+            }
+          />
           <input
             type="range"
             min={0}
@@ -135,35 +171,49 @@ export function ControlsPanel() {
             onChange={(e) => setKeelBallastMass(parseFloat(e.target.value))}
             disabled={config.keelBallastId === 'none'}
           />
-          <span className="is-field__hint">
-            {config.keelBallastId === 'none'
-              ? 'Select a keel type to add ballast mass — appendage shape alone does not lower G'
-              : `Dense mass low in the ${keelOption.title.toLowerCase()} — lowers KG (${((config.keelBallastKg / Math.max(config.totalBoatMassKg, 1)) * 100).toFixed(0)}% of total)`}
-          </span>
         </label>
       </div>
 
       <label className="is-field">
-        <span className="is-field__label">
-          Waterline length (LWL): {config.vesselLengthM.toFixed(1)} m
-        </span>
+        <FieldLabel
+          label={`Waterline length (LWL): ${config.vesselLengthM.toFixed(1)} m`}
+          helpTitle="Waterline length (LWL)"
+          help="Used with total weight — the 2D slice model scales load as kg ÷ LWL. Longer length spreads the same total weight over more metres."
+        />
         <input
           type="range"
-          min={4}
-          max={200}
+          min={MIN_VESSEL_LENGTH_M}
+          max={MAX_VESSEL_LENGTH_M}
           step={0.5}
           value={config.vesselLengthM}
           onChange={(e) => setVesselLength(parseFloat(e.target.value))}
         />
-        <span className="is-field__hint">
-          Used with total weight below — the 2D slice model scales load as kg ÷ LWL.
-        </span>
       </label>
 
       <label className="is-field">
-        <span className="is-field__label">
-          Total weight: {config.totalBoatMassKg.toFixed(0)} kg ({fmtTonnes(config.totalBoatMassKg)})
-        </span>
+        <FieldLabel
+          label={
+            <>
+              Total weight: {config.totalBoatMassKg.toFixed(0)} kg ({fmtTonnes(config.totalBoatMassKg)})
+              {snapshot.ok && (
+                <span className="is-field__live"> · KG = {snapshot.kg.toFixed(2)} m</span>
+              )}
+            </>
+          }
+          helpTitle="Total weight"
+          help={
+            <>
+              0–30 t · independent of draft — the solver finds the actual waterline for this load.
+              {snapshot.ok && (
+                <>
+                  {' '}
+                  Design displacement at reference draft ≈ {fmtTonnes(designBoatMassKg)} for this hull
+                  and length.
+                </>
+              )}
+            </>
+          }
+        />
         <input
           type="range"
           min={0}
@@ -172,26 +222,30 @@ export function ControlsPanel() {
           value={config.totalBoatMassKg}
           onChange={(e) => setTotalBoatMass(parseFloat(e.target.value))}
         />
-        <span className="is-field__hint">
-          0–30 t · KG = {snapshot.ok ? snapshot.kg.toFixed(2) : '—'} m
-          {snapshot.ok && (
-            <>
-              {' · design displacement ≈ '}
-              {fmtTonnes(designBoatMassKg)}
-              {' at this hull & length (100% = design waterline)'}
-            </>
-          )}
-        </span>
       </label>
 
       {visibleParamKeys.map((key) => {
         const range = hullType.paramRanges[key]
         const val = config.params[key]
+        const label = hullType.paramLabels?.[key] ?? range.label
+        const help = resolveParamHelp(key, config.presetId, label)
         return (
           <label key={key} className="is-field">
-            <span className="is-field__label">
-              {hullType.paramLabels?.[key] ?? range.label}: {val.toFixed(2)}
-            </span>
+            <FieldLabel
+              label={
+                <>
+                  {label}: {val.toFixed(2)}
+                  {key === 'draft' && snapshot.ok && (
+                    <span className="is-field__live">
+                      {' '}
+                      · KB ≈ {snapshot.kbUpright.toFixed(2)} m · WL ≈ {snapshot.waterlineZ.toFixed(2)} m
+                    </span>
+                  )}
+                </>
+              }
+              helpTitle={help.title}
+              help={help.text}
+            />
             <input
               type="range"
               min={range.min}
@@ -200,52 +254,40 @@ export function ControlsPanel() {
               value={val}
               onChange={(e) => setParam(key, parseFloat(e.target.value) as HullParams[typeof key])}
             />
-            {key === 'draft' && (
-              <span className="is-field__hint">
-                Draft — depth from the keel (K) to the design waterline: grows the hull below the water
-                only. At design loading (100% weight), the waterline sits here.
-                {snapshot.ok &&
-                  ` KB ≈ ${snapshot.kbUpright.toFixed(2)} m · WL ≈ ${snapshot.waterlineZ.toFixed(2)} m.`}
-              </span>
-            )}
-            {key === 'freeboard' && (
-              <span className="is-field__hint">
-                Freeboard — height from the design waterline to the deck edge: the dry topsides above the
-                sea. It does not add underwater volume, but adds superstructure mass and raises KG.
-                {snapshot.ok && ' B moves only if total immersion (loading) changes.'}
-              </span>
-            )}
-            {key === 'finDepth' && (
-              <span className="is-field__hint">
-                Fin depth — extra appendage length below the hull bottom (does not reduce draft). The hull
-                body and waterline stay fixed; the section grows deeper at the keel.
-              </span>
-            )}
           </label>
         )
       })}
 
       {snapshot.ok && (
         <div className="is-field">
-          <span className="is-field__label">Displacement (computed)</span>
-          <span className="is-field__hint">
-            ∇ = {snapshot.area.toFixed(2)} m²/m (cross-section) · supporting{' '}
-            {fmtTonnes(snapshot.totalBoatMassKg)} total at {snapshot.vesselLengthM.toFixed(1)} m LWL
+          <FieldLabel
+            label="Displacement (computed)"
+            helpTitle="Displacement (computed)"
+            help="Submerged cross-section area ∇ at the solved waterline, multiplied by LWL for total buoyancy. Should match your total weight slider at equilibrium."
+          />
+          <span className="is-field__live">
+            ∇ = {snapshot.area.toFixed(2)} m²/m · supporting {fmtTonnes(snapshot.totalBoatMassKg)} at{' '}
+            {snapshot.vesselLengthM.toFixed(1)} m LWL
           </span>
         </div>
       )}
 
       <div className="is-controls-section">
-        <h4 className="is-controls-section__title">Wave simulation</h4>
-        <span className="is-field__hint">
-          Adjust sea state and playback speed, then press Play on the diagram.
-          {rollSimActive ? ' Simulation running.' : ''}
-        </span>
+        <h4 className="is-controls-section__title is-controls-section__title--row">
+          <span>Wave simulation</span>
+          <HelpPopover title="Wave simulation">
+            Adjust sea state and playback speed, then press Play on the diagram to roll the vessel in
+            waves.
+          </HelpPopover>
+        </h4>
+        {rollSimActive && <span className="is-field__live">Simulation running.</span>}
 
         <label className="is-field">
-          <span className="is-field__label">
-            Wave height: {config.waveHeightM.toFixed(2)} m
-          </span>
+          <FieldLabel
+            label={`Wave height: ${config.waveHeightM.toFixed(2)} m`}
+            helpTitle="Wave height"
+            help="Peak-to-trough height of the rolling swell driving heel. Larger waves excite greater roll amplitude."
+          />
           <input
             type="range"
             min={0}
@@ -257,13 +299,20 @@ export function ControlsPanel() {
         </label>
 
         <label className="is-field">
-          <span className="is-field__label">
-            Wave period: {config.wavePeriodS.toFixed(1)} s
-            {' · '}
-            f = {waveFrequencyHz(config.wavePeriodS).toFixed(2)} Hz
-            {' · '}
-            λ ≈ {waveLengthDeepWater(config.wavePeriodS).toFixed(0)} m
-          </span>
+          <FieldLabel
+            label={
+              <>
+                Wave period: {config.wavePeriodS.toFixed(1)} s
+                <span className="is-field__live">
+                  {' '}
+                  · f = {waveFrequencyHz(config.wavePeriodS).toFixed(2)} Hz · λ ≈{' '}
+                  {waveLengthDeepWater(config.wavePeriodS).toFixed(0)} m
+                </span>
+              </>
+            }
+            helpTitle="Wave period"
+            help="Time between wave crests. Longer period means longer wavelength and slower roll forcing."
+          />
           <input
             type="range"
             min={2}
@@ -275,13 +324,11 @@ export function ControlsPanel() {
         </label>
 
         <label className="is-field">
-          <span className="is-field__label">
-            Wave irregularity: {(config.waveNoise * 100).toFixed(0)}%
-          </span>
-          <span className="is-field__hint">
-            0% = smooth rolling swell; higher values add short chop on the water surface. Chop
-            barely affects roll — heel still follows main wave height and period.
-          </span>
+          <FieldLabel
+            label={`Wave irregularity: ${(config.waveNoise * 100).toFixed(0)}%`}
+            helpTitle="Wave irregularity"
+            help="0% = smooth rolling swell; higher values add short chop on the water surface. Chop barely affects roll — heel still follows main wave height and period."
+          />
           <input
             type="range"
             min={0}
@@ -293,9 +340,11 @@ export function ControlsPanel() {
         </label>
 
         <label className="is-field">
-          <span className="is-field__label">
-            Sim speed: {config.simSpeed.toFixed(1)}×
-          </span>
+          <FieldLabel
+            label={`Sim speed: ${config.simSpeed.toFixed(1)}×`}
+            helpTitle="Sim speed"
+            help="Playback multiplier for the wave roll animation. Does not change physics — only how fast simulated time advances."
+          />
           <input
             type="range"
             min={0.25}
@@ -307,9 +356,11 @@ export function ControlsPanel() {
         </label>
 
         <label className="is-field">
-          <span className="is-field__label">
-            Roll damping: {(config.dampingRatio * 100).toFixed(0)}%
-          </span>
+          <FieldLabel
+            label={`Roll damping: ${(config.dampingRatio * 100).toFixed(0)}%`}
+            helpTitle="Roll damping"
+            help="Energy dissipation in the roll motion — higher damping settles oscillations faster after each wave encounter."
+          />
           <input
             type="range"
             min={0.02}
@@ -323,40 +374,39 @@ export function ControlsPanel() {
         {isMultiHullPreset(config.presetId) && (
           <>
             <label className="is-field is-field--toggle">
-              <span className="is-field__label">Jointed deck</span>
+              <FieldLabel
+                label="Jointed deck"
+                helpTitle="Jointed deck"
+                help="Deck connected to each hull on hinges — demi-hulls ride local swell and the bridge pitches between them. No active stabilizers."
+              />
               <Toggle
                 on={config.jointedDeck}
                 onChange={(on) => setWaveSimParam('jointedDeck', on)}
                 label="Jointed deck"
               />
-              <span className="is-field__hint">
-                Deck connected to each hull on hinges — demi-hulls ride local swell and the bridge
-                pitches between them. No active stabilizers.
-              </span>
             </label>
 
             <label className="is-field is-field--toggle">
-              <span className="is-field__label">Dynamic hull stabilization</span>
+              <FieldLabel
+                label="Dynamic hull stabilization"
+                helpTitle="Dynamic hull stabilization"
+                help="Active ride control — deck stays level while hulls track the swell (gyros / actuators). Mutually exclusive with jointed deck."
+              />
               <Toggle
                 on={config.dynamicHullStabilization}
                 onChange={(on) => setWaveSimParam('dynamicHullStabilization', on)}
                 label="Dynamic hull stabilization"
               />
-              <span className="is-field__hint">
-                Active ride control — deck stays level while hulls track the swell (gyros /
-                actuators). Mutually exclusive with jointed deck.
-              </span>
             </label>
 
             {config.dynamicHullStabilization && (
               <>
                 <label className="is-field">
-                  <span className="is-field__label">
-                    Stabilization strength: {(config.hullStabilizationStrength * 100).toFixed(0)}%
-                  </span>
-                  <span className="is-field__hint">
-                    How hard the system fights deck motion. 100% = full authority requested.
-                  </span>
+                  <FieldLabel
+                    label={`Stabilization strength: ${(config.hullStabilizationStrength * 100).toFixed(0)}%`}
+                    helpTitle="Stabilization strength"
+                    help="How hard the system fights deck motion. 100% = full authority requested."
+                  />
                   <input
                     type="range"
                     min={0}
@@ -370,13 +420,11 @@ export function ControlsPanel() {
                 </label>
 
                 <label className="is-field">
-                  <span className="is-field__label">
-                    Actuator stroke limit: {config.hullStabilizationLimitM.toFixed(2)} m
-                  </span>
-                  <span className="is-field__hint">
-                    Max vertical travel of gyros / active ride units. Beyond this the deck must
-                    move with the sea.
-                  </span>
+                  <FieldLabel
+                    label={`Actuator stroke limit: ${config.hullStabilizationLimitM.toFixed(2)} m`}
+                    helpTitle="Actuator stroke limit"
+                    help="Max vertical travel of gyros / active ride units. Beyond this the deck must move with the sea."
+                  />
                   <input
                     type="range"
                     min={0.05}

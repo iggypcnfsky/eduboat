@@ -1,7 +1,36 @@
+import { type ReactNode } from 'react'
+import { CircleHelp } from 'lucide-react'
 import { useStability } from '../store'
+import { HelpPopover } from './HelpPopover'
 
 function fmt(n: number, d = 3) {
   return Number.isFinite(n) ? n.toFixed(d) : '—'
+}
+
+function EquationBlock({
+  formula,
+  helpTitle,
+  helpText,
+  children,
+  small,
+}: {
+  formula: string
+  helpTitle: string
+  helpText: string
+  children: ReactNode
+  small?: boolean
+}) {
+  return (
+    <div className={small ? 'is-eq is-eq--small' : 'is-eq'}>
+      <div className="is-eq__header">
+        <div className="is-eq__formula">{formula}</div>
+        <HelpPopover title={helpTitle} icon={CircleHelp}>
+          {helpText}
+        </HelpPopover>
+      </div>
+      {children}
+    </div>
+  )
 }
 
 export function EquationsPanel() {
@@ -21,15 +50,21 @@ export function EquationsPanel() {
 
   return (
     <div className="is-panel-inner">
-      <div className="is-eq">
-        <div className="is-eq__formula">MR(θ) = Δ × GZ(θ)</div>
+      <EquationBlock
+        formula="MR(θ) = Δ × GZ(θ)"
+        helpTitle="Righting moment"
+        helpText="Righting moment (kN·m) equals weight Δ times the righting lever GZ. Positive MR with heel in the same direction tends to return the vessel upright."
+      >
         <div className="is-eq__values">
           {fmt(snapshot.mr, 2)} kN·m = {fmt(snapshot.displacementKg, 0)} kg × {fmt(snapshot.gz, 4)} m × g
         </div>
-      </div>
+      </EquationBlock>
 
-      <div className="is-eq">
-        <div className="is-eq__formula">GZ(θ) ≈ GM × sin(θ)</div>
+      <EquationBlock
+        formula="GZ(θ) ≈ GM × sin(θ)"
+        helpTitle="Small-angle GZ"
+        helpText="Small-angle approximation: metacentric height GM times sine of heel. Accurate only at small θ; diverges as the hull submerges new volume at large heel."
+      >
         <div className="is-eq__values">
           {fmt(snapshot.gz, 4)} m ≈ {fmt(snapshot.gmUpright, 3)} × {fmt(sinT, 4)} = {fmt(snapshot.gzApprox, 4)} m
         </div>
@@ -40,10 +75,13 @@ export function EquationsPanel() {
             snapshot.approxErrorPct > 5 &&
             ' — GM·sin(θ) diverges at large θ'}
         </div>
-      </div>
+      </EquationBlock>
 
-      <div className="is-eq">
-        <div className="is-eq__formula">GM = KB + BM − KG</div>
+      <EquationBlock
+        formula="GM = KB + BM − KG"
+        helpTitle="Metacentric height"
+        helpText="Metacentric height from the upright decomposition: centre of buoyancy height KB, metacentric radius BM, minus centre of gravity height KG. GM > 0 means stable upright."
+      >
         <div className="is-eq__values">
           <span className="is-eq__shape">{fmt(snapshot.kbUpright, 3)}</span>
           {' + '}
@@ -57,14 +95,18 @@ export function EquationsPanel() {
           <span className="is-eq__shape">KB, BM = hull shape & computed displacement</span>
           <span className="is-eq__weight">KG = weight slider &amp; keel type</span>
         </div>
-      </div>
+      </EquationBlock>
 
-      <div className="is-eq is-eq--small">
-        <div className="is-eq__formula">BM = I / ∇</div>
+      <EquationBlock
+        formula="BM = I / ∇"
+        helpTitle="Metacentric radius"
+        helpText="Metacentric radius: waterplane second moment I divided by submerged volume ∇ (per metre length in this 2D strip model). Wider waterplanes increase BM."
+        small
+      >
         <div className="is-eq__values">
           At θ={config.heelDeg.toFixed(1)}°: BM = {fmt(snapshot.bm, 3)} m
         </div>
-      </div>
+      </EquationBlock>
     </div>
   )
 }

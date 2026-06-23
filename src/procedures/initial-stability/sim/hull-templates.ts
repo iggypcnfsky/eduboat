@@ -1,5 +1,5 @@
 import { getPreset, isMultiHullPreset } from './hull-presets'
-import { clampTotalBoatMassKg, defaultKeelBallastKg, defaultTotalBoatMassKg } from './weight-distribution'
+import { clampTotalBoatMassKg, clampVesselLengthM, defaultKeelBallastKg, defaultTotalBoatMassKg } from './weight-distribution'
 import type { HullParams, KeelBallastId, SimConfig } from './types'
 
 export const CUSTOM_TEMPLATE_ID = 'custom'
@@ -265,7 +265,7 @@ export function applyTemplateToConfig(prev: SimConfig, template: BoatTemplate): 
     presetId: prev.presetId,
     templateId: template.id,
     params: { ...preset.defaultParams, ...template.params },
-    vesselLengthM: template.vesselLengthM,
+    vesselLengthM: clampVesselLengthM(template.vesselLengthM),
     keelBallastId,
   }
 

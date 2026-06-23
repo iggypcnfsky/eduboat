@@ -12,6 +12,14 @@ export interface CenterOfGravityResult {
 
 export const DEFAULT_VESSEL_LENGTH_M = 12
 
+/** LWL slider and store bounds (m). */
+export const MIN_VESSEL_LENGTH_M = 1
+export const MAX_VESSEL_LENGTH_M = 100
+
+export function clampVesselLengthM(m: number): number {
+  return Math.max(MIN_VESSEL_LENGTH_M, Math.min(MAX_VESSEL_LENGTH_M, m))
+}
+
 /** Maximum total boat mass exposed in controls (30 tonnes). */
 export const MAX_TOTAL_BOAT_MASS_KG = 30_000
 
@@ -25,7 +33,7 @@ export function displacementMassKg(submergedArea: number): number {
 
 /** Strip-model mass (kg/m) from total boat mass and length. */
 export function linearMassKgPerM(totalBoatMassKg: number, vesselLengthM: number): number {
-  return totalBoatMassKg / Math.max(vesselLengthM, 0.5)
+  return totalBoatMassKg / clampVesselLengthM(vesselLengthM)
 }
 
 /** Per-meter loads for the 2D cross-section solver. */
@@ -33,7 +41,7 @@ export function linearLoadsFromConfig(config: SimConfig): {
   linearTotalKg: number
   linearKeelKg: number
 } {
-  const len = Math.max(config.vesselLengthM, 0.5)
+  const len = clampVesselLengthM(config.vesselLengthM)
   return {
     linearTotalKg: config.totalBoatMassKg / len,
     linearKeelKg: config.keelBallastKg / len,
@@ -48,7 +56,7 @@ export function defaultTotalMassKg(referenceArea: number): number {
 /** Design displacement for the whole boat at reference draft (kg). */
 export function defaultTotalBoatMassKg(config: SimConfig): number {
   const refArea = designReferenceAreaForConfig(config)
-  return defaultTotalMassKg(refArea) * Math.max(config.vesselLengthM, 0.5)
+  return defaultTotalMassKg(refArea) * clampVesselLengthM(config.vesselLengthM)
 }
 
 /** Typical keel ballast mass as a fraction of design displacement (kg/m). */
@@ -60,7 +68,7 @@ export function defaultKeelBallastMassKg(referenceArea: number, keelId: KeelBall
 /** Typical total keel ballast mass (kg). */
 export function defaultKeelBallastKg(config: SimConfig, keelId: KeelBallastId = config.keelBallastId): number {
   const refArea = designReferenceAreaForConfig(config)
-  return defaultKeelBallastMassKg(refArea, keelId) * Math.max(config.vesselLengthM, 0.5)
+  return defaultKeelBallastMassKg(refArea, keelId) * clampVesselLengthM(config.vesselLengthM)
 }
 
 /** Lightship / hull structure centroid (body frame, from K). */

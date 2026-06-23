@@ -11,7 +11,7 @@ import {
 import {
   DEFAULT_VESSEL_LENGTH_M,
   clampTotalBoatMassKg,
-  defaultTotalBoatMassKg,
+  clampVesselLengthM,
 } from './sim/weight-distribution'
 import type { GzCurve, HullPresetId, HydroSnapshot, KeelBallastId, SimConfig } from './sim/types'
 
@@ -177,15 +177,7 @@ export const useStability = create<StabilityState>((set, get) => ({
   setParam: (key, value) => {
     const prev = get().config
     const params = { ...prev.params, [key]: value }
-    let config: SimConfig = { ...prev, templateId: CUSTOM_TEMPLATE_ID, params }
-    if (key === 'draft' || key === 'freeboard' || key === 'finDepth' || key === 'keelThickness') {
-      const designMass = clampTotalBoatMassKg(defaultTotalBoatMassKg(config))
-      config = {
-        ...config,
-        totalBoatMassKg: designMass,
-        keelBallastKg: Math.min(config.keelBallastKg, designMass),
-      }
-    }
+    const config: SimConfig = { ...prev, templateId: CUSTOM_TEMPLATE_ID, params }
     set(recomputeKeepingSim(config, get()))
   },
 
@@ -207,7 +199,7 @@ export const useStability = create<StabilityState>((set, get) => ({
   },
 
   setVesselLength: (m) => {
-    const vesselLengthM = Math.max(4, Math.min(200, m))
+    const vesselLengthM = clampVesselLengthM(m)
     const config = { ...get().config, templateId: CUSTOM_TEMPLATE_ID, vesselLengthM }
     set(recomputeKeepingSim(config, get()))
   },
