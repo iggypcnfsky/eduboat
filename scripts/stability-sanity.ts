@@ -5,15 +5,26 @@ import {
   computeHydrostatics,
   computeUprightMetrics,
 } from '../src/procedures/initial-stability/sim/hydrostatics'
-import { bodyToEarthOutline, findWaterlineForArea } from '../src/procedures/initial-stability/sim/geometry'
+import { bodyToEarthOutline, findWaterlineForArea, bodyToEarth } from '../src/procedures/initial-stability/sim/geometry'
 import { designReferenceAreaForConfig } from '../src/procedures/initial-stability/sim/keel-config'
+import {
+  clampCustomHullDraft,
+  deriveHullParams,
+  designWaterlineZForDraft,
+  sampleCustomHullOutline,
+  applyCustomHullKeelHeight,
+  customHullKeelHeight,
+} from '../src/procedures/initial-stability/sim/custom-hull'
+import type { CustomHullDesign } from '../src/procedures/initial-stability/sim/custom-hull'
 import {
   computeCenterOfGravity,
   DEFAULT_VESSEL_LENGTH_M,
+  clampTotalBoatMassKg,
   defaultKeelBallastKg,
   defaultTotalBoatMassKg,
   defaultTotalMassKg,
   linearLoadsFromConfig,
+  weightSliderMaxKg,
 } from '../src/procedures/initial-stability/sim/weight-distribution'
 import type { SimConfig } from '../src/procedures/initial-stability/sim/types'
 
@@ -59,6 +70,7 @@ function finConfig(partial: Partial<SimConfig> = {}): SimConfig {
     jointedDeck: false,
     hullStabilizationStrength: 0.85,
     hullStabilizationLimitM: 0.5,
+    waveSwayEnabled: false,
     ...partial,
   }
   if (!partial.totalBoatMassKg) {
@@ -174,6 +186,136 @@ function finConfig(partial: Partial<SimConfig> = {}): SimConfig {
   if (snap.ok) {
     assert('K at origin in body frame', Math.abs(snap.kEarth.x) < 1e-6 && Math.abs(snap.kEarth.z) < 1e-6)
   }
+}
+
+// 7. Param sliders preserve total weight (no withDesignDisplacement on setParam)
+{
+  const customMass = 42_000
+  const base = finConfig({ totalBoatMassKg: customMass, keelBallastKg: 8_000 })
+
+  function applyParamChange(cfg: SimConfig, key: keyof SimConfig['params'], value: number): SimConfig {
+    return { ...cfg, params: { ...cfg.params, [key]: value } }
+  }
+
+  const afterDraft = applyParamChange(base, 'draft', base.params.draft + 0.35)
+  const draftSnap = computeHydrostatics(afterDraft)
+  assert('Draft change preserves totalBoatMassKg', afterDraft.totalBoatMassKg === customMass)
+  assert('Draft change hydrostatics ok', draftSnap.ok, draftSnap.error)
+
+  const afterFin = applyParamChange(base, 'finDepth', base.params.finDepth + 0.4)
+  const finSnap = computeHydrostatics(afterFin)
+  assert('Fin depth change preserves totalBoatMassKg', afterFin.totalBoatMassKg === customMass)
+  assert('Fin depth change hydrostatics ok', finSnap.ok, finSnap.error)
+
+  const afterLwl = { ...base, vesselLengthM: base.vesselLengthM + 3 }
+  const lwlSnap = computeHydrostatics(afterLwl)
+  assert('LWL change preserves totalBoatMassKg', afterLwl.totalBoatMassKg === customMass)
+  assert('LWL change hydrostatics ok', lwlSnap.ok, lwlSnap.error)
+
+  const heavyKeel = finConfig({ totalBoatMassKg: 42_000, keelBallastKg: 40_000 })
+  const maxKg = weightSliderMaxKg(heavyKeel)
+  const totalAfterLower = clampTotalBoatMassKg(Math.max(heavyKeel.keelBallastKg, 25_000), maxKg)
+  assert(
+    'Lowering total below keel preserves keel ballast',
+    heavyKeel.keelBallastKg === 40_000 && totalAfterLower === 40_000,
+    `keel=${heavyKeel.keelBallastKg}, total=${totalAfterLower}`,
+  )
+}
+
+// 8. Custom hull draft slider maps to design waterline Z
+{
+  const design: CustomHullDesign = {
+    id: 'test-hull',
+    name: 'Test',
+    nodes: [
+      { anchor: { x: 0, z: 0 }, handleIn: { x: 0, z: 0 }, handleOut: { x: 0.2, z: 0.1 }, handlesLinked: true, region: 'hull' },
+      { anchor: { x: 1.6, z: 0.4 }, handleIn: { x: -0.2, z: 0 }, handleOut: { x: 0.2, z: 0.2 }, handlesLinked: true, region: 'hull' },
+      { anchor: { x: 0, z: 1.2 }, handleIn: { x: -0.2, z: 0 }, handleOut: { x: 0, z: 0 }, handlesLinked: true, region: 'hull' },
+    ],
+    designWaterlineZ: 0.55,
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const outline = sampleCustomHullOutline(design)
+  const targetDraft = clampCustomHullDraft(outline, 0.72)
+  const wlZ = designWaterlineZForDraft(outline, targetDraft)
+  const derived = deriveHullParams(outline, wlZ)
+  assert('Custom draft maps to design WL', Math.abs(derived.draft - targetDraft) < 0.001, `draft=${derived.draft}`)
+}
+
+// 9. Custom hull keel height extends downward from fixed hull/keel junction
+{
+  const design: CustomHullDesign = {
+    id: 'keel-hull',
+    name: 'Keel',
+    nodes: [
+      { anchor: { x: 0, z: -0.4 }, handleIn: { x: 0, z: 0 }, handleOut: { x: 0.2, z: 0.1 }, handlesLinked: true, region: 'keel' },
+      { anchor: { x: 0.3, z: 0.05 }, handleIn: { x: -0.1, z: -0.05 }, handleOut: { x: 0.2, z: 0.1 }, handlesLinked: true, region: 'keel' },
+      { anchor: { x: 1.4, z: 0.5 }, handleIn: { x: -0.2, z: 0 }, handleOut: { x: 0.2, z: 0.2 }, handlesLinked: true, region: 'hull' },
+      { anchor: { x: 0, z: 1.1 }, handleIn: { x: 0.2, z: 0 }, handleOut: { x: 0, z: 0 }, handlesLinked: true, region: 'hull' },
+    ],
+    designWaterlineZ: 0.45,
+    createdAt: 0,
+    updatedAt: 0,
+  }
+  const junctionZ = design.nodes[2].anchor.z
+  const keelShapeDz = design.nodes[1].anchor.z - design.nodes[0].anchor.z
+  const before = customHullKeelHeight(design)
+  const updated = applyCustomHullKeelHeight(design, before + 0.25)
+  const after = customHullKeelHeight(updated)
+  assert('Custom keel height applies to design', Math.abs(after - (before + 0.25)) < 0.02, `${before.toFixed(2)} → ${after.toFixed(2)}`)
+  assert(
+    'Hull junction stays fixed when extending height',
+    Math.abs(updated.nodes[2].anchor.z - junctionZ) < 1e-6,
+    `junction ${junctionZ.toFixed(3)} → ${updated.nodes[2].anchor.z.toFixed(3)}`,
+  )
+  assert(
+    'Keel shape preserved (rigid translate)',
+    Math.abs(updated.nodes[1].anchor.z - updated.nodes[0].anchor.z - keelShapeDz) < 1e-6,
+  )
+}
+
+// 10. Dimension lines use hull geometry for deck / draft (not params-only deck)
+{
+  const { computeDimensionSpecs } = await import(
+    '../src/procedures/initial-stability/components/dimension-overlay'
+  )
+  const { applyKeelDatumParts } = await import('../src/procedures/initial-stability/sim/hull-presets')
+  const { buildHullPartsForConfig } = await import('../src/procedures/initial-stability/sim/keel-config')
+  const cfg = finConfig({
+    presetId: 'box-barge',
+    params: {
+      beam: 4,
+      draft: 2,
+      freeboard: 1,
+      bilgeRadius: 0,
+      finDepth: 0,
+      keelThickness: 0,
+      demiHullWidth: 0,
+    },
+    keelBallastId: 'none',
+  })
+  const bodyParts = applyKeelDatumParts(buildHullPartsForConfig(cfg))
+  const snap = computeHydrostatics(cfg)
+  const earthParts = bodyParts.map((p) => p.map((pt) => bodyToEarth(pt, snap.heelRad)))
+  const specs = computeDimensionSpecs({
+    config: cfg,
+    bodyParts,
+    displayEarthParts: earthParts,
+    hullHeaveZs: [0],
+    deckHeaveZ: 0,
+    actualWlEarthZ: () => snap.waterlineZ,
+    heelRad: snap.heelRad,
+  })
+  const draftSpec = specs.find((s) => s.id === 'design-draft')
+  const freeboardSpec = specs.find((s) => s.id === 'design-freeboard')
+  const deckZ = Math.max(...earthParts[0].map((p) => p.z))
+  assert('Design draft matches params', draftSpec && Math.abs(draftSpec.valueM - cfg.params.draft) < 0.05)
+  assert(
+    'Design freeboard line reaches deck geometry',
+    freeboardSpec && Math.abs(freeboardSpec.bBody.z - deckZ) < 0.05,
+    `deck line z=${freeboardSpec?.bBody.z?.toFixed(3)} hull deck=${deckZ.toFixed(3)}`,
+  )
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

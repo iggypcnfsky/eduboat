@@ -3,7 +3,7 @@ import { Minus, Plus, RotateCcw, Play, Pause } from 'lucide-react'
 import { Toggle } from '../../../ui/Toggle'
 import { useStability } from '../store'
 import { bodyToEarth } from '../sim/geometry'
-import { buildHullPartsForConfig } from '../sim/keel-config'
+import { buildHullPartsForConfig, customHullKeelPartIndex } from '../sim/keel-config'
 import {
   applyKeelDatumParts,
   buildJointedBridgeQuad,
@@ -19,10 +19,18 @@ import {
   enforceMultihullDryDeck,
   resolveMultihullHeaveMode,
   stepRoll,
+  waveSurfaceZ,
+  waveSwayOffsetM,
   type RollState,
   type WaveVisualParams,
 } from '../sim/roll-dynamics'
 import type { Vec2 } from '../sim/types'
+import {
+  computeDimensionSpecs,
+  DimensionLabels,
+  DimensionLines,
+} from './dimension-overlay'
+import { HelpPopover } from './HelpPopover'
 
 const SVG_W = 640
 const SVG_H = 520
@@ -461,6 +469,7 @@ export function HullDiagram() {
   const setHeelDeg = useStability((s) => s.setHeelDeg)
   const setRollSimActive = useStability((s) => s.setRollSimActive)
   const setSimTimeS = useStability((s) => s.setSimTimeS)
+  const setWaveSimParam = useStability((s) => s.setWaveSimParam)
 
   const waveVisual: WaveVisualParams = useMemo(
     () => ({
@@ -485,6 +494,7 @@ export function HullDiagram() {
   const [showGravity, setShowGravity] = useState(true)
   const [showReference, setShowReference] = useState(true)
   const [showGz, setShowGz] = useState(true)
+  const [showDimensions, setShowDimensions] = useState(false)
 
   useEffect(() => {
     const el = svgRef.current
@@ -501,6 +511,7 @@ export function HullDiagram() {
     () => applyKeelDatumParts(buildHullPartsForConfig(config)),
     [
       config.presetId,
+      config.customHullId,
       config.keelBallastId,
       config.params.beam,
       config.params.draft,
@@ -556,24 +567,35 @@ export function HullDiagram() {
 
   const { view, bounds: designBounds } = designFrame
 
+  const showWaves = rollSimActive || simTimeS > 0
+  const swayActive = snapshot.ok && showWaves && config.waveSwayEnabled
+  const swayX = swayActive
+    ? waveSwayOffsetM(snapshot.bEarth.x, simTimeS, waveVisual)
+    : 0
+  const followPanX = swayActive ? -swayX * view.scale * zoom : 0
+  const displayPan = useMemo(
+    () => ({ x: pan.x + followPanX, y: pan.y }),
+    [pan.x, pan.y, followPanX],
+  )
+
   const sceneBounds = useMemo(
     () => mergeEarthBounds(designBounds, designBoundsForCamera),
     [designBounds, designBoundsForCamera],
   )
 
   const renderBounds = useMemo(
-    () => computeRenderEarthBounds(view, zoom, pan, sceneBounds, svgSize.w / Math.max(svgSize.h, 1)),
-    [view, zoom, pan.x, pan.y, sceneBounds, svgSize.w, svgSize.h],
+    () => computeRenderEarthBounds(view, zoom, displayPan, sceneBounds, svgSize.w / Math.max(svgSize.h, 1)),
+    [view, zoom, displayPan.x, displayPan.y, sceneBounds, svgSize.w, svgSize.h],
   )
 
   const fillXHalf = useMemo(
-    () => fillEarthHalfWidth(view, zoom, pan, svgSize.w, svgSize.h),
-    [view, zoom, pan.x, pan.y, svgSize.w, svgSize.h],
+    () => fillEarthHalfWidth(view, zoom, displayPan, svgSize.w, svgSize.h),
+    [view, zoom, displayPan.x, displayPan.y, svgSize.w, svgSize.h],
   )
 
   const fillZSpan = useMemo(
-    () => fillEarthDepthSpan(view, zoom, pan, svgSize.w, svgSize.h, view.cy),
-    [view, zoom, pan.x, pan.y, svgSize.w, svgSize.h, view.cy],
+    () => fillEarthDepthSpan(view, zoom, displayPan, svgSize.w, svgSize.h, view.cy),
+    [view, zoom, displayPan.x, displayPan.y, svgSize.w, svgSize.h, view.cy],
   )
 
   const sceneXHalf = Math.max(renderBounds.xHalf, fillXHalf)
@@ -728,7 +750,7 @@ export function HullDiagram() {
     )
   }
 
-  const showWaves = rollSimActive || simTimeS > 0
+  const showWavesRender = showWaves
   const hullParts =
     snapshot.hullEarthParts.length > 0 ? snapshot.hullEarthParts : [snapshot.hullEarth]
   const hullCenterXs = hullParts.map(
@@ -744,10 +766,10 @@ export function HullDiagram() {
     : 'rigid'
   const dynamicMultihull = heaveMode === 'dynamic'
   const jointedDeck = heaveMode === 'jointed'
-  const baseHeaveLayout = showWaves
+  const baseHeaveLayout = showWavesRender
     ? computeVesselHeaveLayout(
-        hullCenterXs,
-        snapshot.bEarth.x,
+        swayActive ? hullCenterXs.map((x) => x + swayX) : hullCenterXs,
+        swayActive ? snapshot.bEarth.x + swayX : snapshot.bEarth.x,
         snapshot.waterlineZ,
         simTimeS,
         waveVisual,
@@ -777,12 +799,12 @@ export function HullDiagram() {
   const hullDeckTopZsEarth = hullParts.map((part) => Math.max(...part.map((p) => p.z)))
 
   const heaveState =
-    showWaves && multihullActive
+    showWavesRender && multihullActive
       ? enforceMultihullDryDeck(
           baseHeaveLayout,
           multiHullBridges.map((b) => b.platform),
           bridgeHullPairs,
-          hullCenterXs,
+          swayActive ? hullCenterXs.map((x) => x + swayX) : hullCenterXs,
           hullDeckTopZsEarth,
           snapshot.waterlineZ,
           simTimeS,
@@ -796,13 +818,22 @@ export function HullDiagram() {
   const hullHeaveZs = heaveState.hullHeaveZs
   const dryDeckBoostM = heaveState.dryDeckBoostM
   const hzDeck = (z: number) => z + deckHeaveZ
-  const flipDeck = (p: Vec2) => view.flip(p.x, hzDeck(p.z))
+  const flipEarth = (p: Vec2, heaveZ = deckHeaveZ) => view.flip(p.x + swayX, p.z + heaveZ)
+  const flipEarthFixed = (p: Vec2, heaveZ = deckHeaveZ) => view.flip(p.x, p.z + heaveZ)
+  const flipDeck = (p: Vec2) => flipEarth(p, deckHeaveZ)
+  const flipDeckFixed = (p: Vec2) => flipEarthFixed(p, deckHeaveZ)
 
   const hullPaths = hullParts
     .filter((part) => part.length >= 3)
     .map((part, i) =>
-      toPath(part.map((p) => view.flip(p.x, p.z + (hullHeaveZs[i] ?? deckHeaveZ)))),
+      toPath(part.map((p) => view.flip(p.x + swayX, p.z + (hullHeaveZs[i] ?? deckHeaveZ)))),
     )
+
+  const keelAppendagePartIndex = customHullKeelPartIndex(config)
+  const hullFill = (i: number) =>
+    i === keelAppendagePartIndex ? 'rgba(240, 163, 94, 0.28)' : 'rgba(22, 34, 46, 0.52)'
+  const hullStroke = (i: number) => (i === keelAppendagePartIndex ? '#e0954a' : '#8fa3b0')
+  const hullStrokeOpacity = (i: number) => (i === keelAppendagePartIndex ? 0.92 : 0.56)
 
   const multihullPitch = jointedDeck
   const bridgePlatformDepth = (i: number) => {
@@ -885,17 +916,17 @@ export function HullDiagram() {
   const circleR = metaRadiusM * view.scale
 
   const mPlumb = view.flip(m0Earth.x, hzDeck(m0Earth.z))
-  const b0 = flipDeck(snapshot.bEarthUpright)
-  const g0 = flipDeck(snapshot.gEarthUpright)
+  const b0 = flipDeckFixed(snapshot.bEarthUpright)
+  const g0 = flipDeckFixed(snapshot.gEarthUpright)
 
-  const kHull = flipDeck(snapshot.kEarth)
-  const g = flipDeck(snapshot.gEarth)
-  const b = flipDeck(snapshot.bEarth)
+  const kHull = flipEarth(snapshot.kEarth)
+  const g = flipEarth(snapshot.gEarth)
+  const b = flipEarth(snapshot.bEarth)
 
   const heeled = Math.abs(config.heelDeg) > 0.5
-  const bPlumbAtG = view.flip(snapshot.bEarth.x, hzDeck(snapshot.gEarth.z))
+  const bPlumbAtG = view.flip(snapshot.bEarth.x + swayX, hzDeck(snapshot.gEarth.z))
 
-  const tp = (p: ScreenPt) => applyPanZoom(p.sx, p.sy, zoom, pan)
+  const tp = (p: ScreenPt) => applyPanZoom(p.sx, p.sy, zoom, displayPan)
 
   let mAngleArc: { d: string; lx: number; ly: number } | null = null
   if (heeled && bm > 0.01) {
@@ -965,6 +996,23 @@ export function HullDiagram() {
   const gS = tp(g)
   const bPlumbAtGS = tp(bPlumbAtG)
 
+  const displayEarthParts = hullParts.map((part, i) =>
+    part.map((p) => ({ x: p.x + swayX, z: p.z + (hullHeaveZs[i] ?? deckHeaveZ) })),
+  )
+
+  const dimensionSpecs = computeDimensionSpecs({
+    config,
+    bodyParts: bodyHullParts,
+    displayEarthParts,
+    hullHeaveZs,
+    deckHeaveZ,
+    actualWlEarthZ: (x) =>
+      showWaves
+        ? waveSurfaceZ(x, snapshot.waterlineZ, simTimeS, waveVisual)
+        : snapshot.waterlineZ + deckHeaveZ,
+    heelRad: snapshot.heelRad,
+  })
+
   return (
     <div className="is-diagram">
       <div className="is-diagram__header" onPointerDown={(e) => e.stopPropagation()}>
@@ -998,10 +1046,26 @@ export function HullDiagram() {
         )}
 
         <div className="is-diagram__layers is-diagram__layers--header">
+          <label
+            className={`is-diagram__layer${showWaves ? '' : ' is-diagram__layer--muted'}`}
+          >
+            <Toggle
+              on={config.waveSwayEnabled}
+              onChange={(on) => setWaveSimParam('waveSwayEnabled', on)}
+              locked={!showWaves}
+              label="Sway (X)"
+            />
+            <span className="is-diagram__layer-label">Sway (X)</span>
+            <HelpPopover title="Sway (X)">
+              Adds horizontal wave orbital motion in the section view. The camera follows the hull;
+              stability numbers (G, B, GM) stay earth-fixed.
+            </HelpPopover>
+          </label>
           <LayerToggle label="Gravity" on={showGravity} onChange={setShowGravity} />
           <LayerToggle label="Buoyancy" on={showBuoyancy} onChange={setShowBuoyancy} />
           <LayerToggle label="Reference" on={showReference} onChange={setShowReference} />
           <LayerToggle label="GZ (θ)" on={showGz} onChange={setShowGz} />
+          <LayerToggle label="Dimensions" on={showDimensions} onChange={setShowDimensions} />
         </div>
 
         <div className="is-diagram__toolbar">
@@ -1030,7 +1094,7 @@ export function HullDiagram() {
         onPointerLeave={onPointerUp}
         onWheel={onWheel}
       >
-        <g transform={panZoomTransform(zoom, pan)}>
+        <g transform={panZoomTransform(zoom, displayPan)}>
           <rect x={-EXT} y={-EXT} width={EXT * 2} height={EXT * 2} fill="transparent" />
 
           <defs>
@@ -1094,7 +1158,7 @@ export function HullDiagram() {
             <path
               key={`hull-fill-${i}`}
               d={d}
-              fill="rgba(22, 34, 46, 0.52)"
+              fill={hullFill(i)}
               stroke="none"
               clipPath="url(#is-hull-clip)"
               pointerEvents="none"
@@ -1131,8 +1195,8 @@ export function HullDiagram() {
                 key={`hull-stroke-below-${i}`}
                 d={d}
                 fill="none"
-                stroke="#8fa3b0"
-                strokeWidth={1.5}
+                stroke={hullStroke(i)}
+                strokeWidth={i === keelAppendagePartIndex ? 1.75 : 1.5}
                 pointerEvents="none"
                 {...NON_SCALING}
               />
@@ -1144,9 +1208,9 @@ export function HullDiagram() {
               key={`hull-stroke-above-${i}`}
               d={d}
               fill="none"
-              stroke="#8fa3b0"
+              stroke={hullStroke(i)}
               strokeWidth={1.5}
-              strokeOpacity={0.56}
+              strokeOpacity={hullStrokeOpacity(i)}
               clipPath="url(#is-above-water-clip)"
               pointerEvents="none"
               {...NON_SCALING}
@@ -1176,36 +1240,36 @@ export function HullDiagram() {
                 const platformPath = dynamicMultihull
                   ? toPath(bridge.platform.map((p) => flipDeck(p)))
                   : jointedCorners
-                    ? toPath(jointedCorners.map((p) => view.flip(p.x, p.z)))
+                    ? toPath(jointedCorners.map((p) => view.flip(p.x + swayX, p.z)))
                     : toPath(bridge.platform.map((p) => flipDeck(p)))
 
                 const topLeft = dynamicMultihull
                   ? flipDeck(bridge.platform[3])
                   : jointedCorners
-                    ? view.flip(jointedCorners[3].x, jointedCorners[3].z)
+                    ? view.flip(jointedCorners[3].x + swayX, jointedCorners[3].z)
                     : flipDeck(bridge.platform[3])
                 const topRight = dynamicMultihull
                   ? flipDeck(bridge.platform[2])
                   : jointedCorners
-                    ? view.flip(jointedCorners[2].x, jointedCorners[2].z)
+                    ? view.flip(jointedCorners[2].x + swayX, jointedCorners[2].z)
                     : flipDeck(bridge.platform[2])
                 const lowLeft = dynamicMultihull
-                  ? view.flip(bridge.lower.x1, hzDeck(bridge.lower.z1))
+                  ? view.flip(bridge.lower.x1 + swayX, hzDeck(bridge.lower.z1))
                   : jointedCorners
-                    ? view.flip(jointedCorners[0].x, jointedCorners[0].z)
+                    ? view.flip(jointedCorners[0].x + swayX, jointedCorners[0].z)
                     : flipDeck(bridge.platform[0])
                 const lowRight = dynamicMultihull
-                  ? view.flip(bridge.lower.x2, hzDeck(bridge.lower.z2))
+                  ? view.flip(bridge.lower.x2 + swayX, hzDeck(bridge.lower.z2))
                   : jointedCorners
-                    ? view.flip(jointedCorners[1].x, jointedCorners[1].z)
+                    ? view.flip(jointedCorners[1].x + swayX, jointedCorners[1].z)
                     : flipDeck(bridge.platform[1])
                 const leftDeckPt =
                   dynamicMultihull && pair
-                    ? view.flip(bridge.lower.x1, hullDeckZ(pair[0]))
+                    ? view.flip(bridge.lower.x1 + swayX, hullDeckZ(pair[0]))
                     : null
                 const rightDeckPt =
                   dynamicMultihull && pair
-                    ? view.flip(bridge.lower.x2, hullDeckZ(pair[1]))
+                    ? view.flip(bridge.lower.x2 + swayX, hullDeckZ(pair[1]))
                     : null
                 return (
                   <g key={`bridge-${i}`}>
@@ -1407,9 +1471,21 @@ export function HullDiagram() {
               </>
             )}
           </g>
+
+          {showDimensions && dimensionSpecs.length > 0 && (
+            <DimensionLines specs={dimensionSpecs} view={view} heelRad={snapshot.heelRad} />
+          )}
         </g>
 
         <g className="is-diagram__overlay">
+          {showDimensions && dimensionSpecs.length > 0 && (
+            <DimensionLabels
+              specs={dimensionSpecs}
+              view={view}
+              heelRad={snapshot.heelRad}
+              tp={tp}
+            />
+          )}
           {heeled && showReference && showBuoyancy && mAngleArc && (
             <path
               d={mAngleArc.d}

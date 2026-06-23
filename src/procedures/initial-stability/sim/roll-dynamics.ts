@@ -279,6 +279,20 @@ export function waveHeaveOffsetM(
   return waveSurfaceZ(xEarth, baseWlZ, timeS, wave) - baseWlZ
 }
 
+/** Deep-water swell orbital horizontal displacement ξ at xEarth (m) — 90° ahead of heave. */
+export function waveSwayOffsetM(
+  xEarth: number,
+  timeS: number,
+  wave?: WaveVisualParams,
+): number {
+  const t = timeS * (wave?.simSpeed ?? 1)
+  const periodS = Math.max(wave?.wavePeriodS ?? 5, 0.5)
+  const omega = waveAngularFrequency(periodS)
+  const k = (2 * Math.PI) / waveLengthDeepWater(periodS)
+  const amplitude = (wave?.waveHeightM ?? 0.35) / 2
+  return amplitude * Math.cos(k * xEarth - omega * t)
+}
+
 export type VesselHeaveLayout = {
   /** Mean vessel heave before active cancellation */
   rigidHeaveZ: number

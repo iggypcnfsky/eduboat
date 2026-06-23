@@ -8,8 +8,16 @@ export type HullPresetId =
   | 'full-keel'
   | 'catamaran'
   | 'trimaran'
+  | 'custom'
 
-export type KeelBallastId = 'none' | 'internal' | 'fin' | 'bulb' | 'full-keel' | 'centerboard'
+export type KeelBallastId =
+  | 'none'
+  | 'internal'
+  | 'custom-keel'
+  | 'fin'
+  | 'bulb'
+  | 'full-keel'
+  | 'centerboard'
 
 export interface HullParams {
   beam: number
@@ -23,6 +31,8 @@ export interface HullParams {
 
 export interface SimConfig {
   presetId: HullPresetId
+  /** Active user-drawn hull when presetId is "custom". */
+  customHullId: string | null
   /** Selected boat-class template, or "custom" after manual edits */
   templateId: string
   params: HullParams
@@ -50,6 +60,8 @@ export interface SimConfig {
   hullStabilizationStrength: number
   /** Max vertical stroke (m) of active stabilizers / actuators */
   hullStabilizationLimitM: number
+  /** Kinematic transverse orbital motion during wave animation (visual only) */
+  waveSwayEnabled: boolean
 }
 
 export interface HydroSnapshot {

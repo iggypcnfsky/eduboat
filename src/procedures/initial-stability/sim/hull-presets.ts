@@ -145,7 +145,27 @@ export const HULL_PRESETS: HullPresetDef[] = [
     },
     paramRanges: SHARED_RANGES,
   },
+  {
+    id: 'custom',
+    title: 'Custom hull',
+    description: 'User-drawn cross-section — beam, draft, and freeboard come from your saved outline.',
+    defaultParams: {
+      beam: 3.2,
+      draft: 1.0,
+      freeboard: 0.65,
+      bilgeRadius: 0,
+      finDepth: 0,
+      keelThickness: 0,
+      demiHullWidth: 0,
+    },
+    visibleParams: [],
+    paramRanges: SHARED_RANGES,
+  },
 ]
+
+export function isCustomHullPreset(presetId: HullPresetId): boolean {
+  return presetId === 'custom'
+}
 
 export function getPreset(id: HullPresetId): HullPresetDef {
   return HULL_PRESETS.find((p) => p.id === id) ?? HULL_PRESETS[0]
@@ -327,6 +347,8 @@ export function buildHullOutline(presetId: HullPresetId, params: HullParams): Ve
       return buildCatamaranParts(params)[0]
     case 'trimaran':
       return buildTrimaranParts(params)[1]
+    case 'custom':
+      return []
   }
 }
 

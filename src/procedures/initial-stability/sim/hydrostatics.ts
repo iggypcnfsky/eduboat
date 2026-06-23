@@ -130,6 +130,7 @@ export function computeHydrostatics(config: SimConfig): HydroSnapshot {
     refArea,
     linearTotalKg,
     linearKeelKg,
+    config,
   )
 
   if (hullEarthParts.every((p) => p.length < 3)) {
@@ -229,7 +230,7 @@ export function computeHydrostatics(config: SimConfig): HydroSnapshot {
 
   let ballastEarth: Vec2 | undefined
   if (config.keelBallastKg > 0) {
-    const bp = ballastBodyPosition(config.params, config.presetId, config.keelBallastId)
+    const bp = ballastBodyPosition(config.params, config.presetId, config.keelBallastId, config)
     ballastEarth = bodyToEarth(bp, heelRad)
   }
 

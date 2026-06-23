@@ -9,7 +9,7 @@ export const PARAM_HELP: Partial<
   },
   draft: {
     title: 'Draft',
-    text: 'Hull depth from keel (K) to the reference waterline on the drawing. Does not change total weight — the solver adjusts immersion until buoyancy matches your weight slider.',
+    text: 'Depth from keel (K) to the design waterline. Reshapes the hull body; your total weight stays fixed — the equilibrium waterline moves if load differs from design displacement. For custom hulls this moves the same design waterline as in the editor.',
   },
   freeboard: {
     title: 'Freeboard',

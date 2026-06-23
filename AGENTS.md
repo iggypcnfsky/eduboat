@@ -7,6 +7,11 @@
 - Navigation lights must follow COLREGS: port (left) = red, starboard (right) = green, stern = white.
 - 3D boat must sit on the water surface; waves should not pass below the hull (no levitation look).
 - Hotspots: icon-only by default, full label on hover; inactive state when device is off.
+- Initial Stability schematic: letter-only point labels (G, B, M, K); show full names on hover, not inline.
+- Schematic zoom must not scale label size or stroke width.
+- Do not auto-refit schematic camera when hull geometry or parameters change.
+- Schematic water and background grid must fill the panel at any zoom/pan (no horizontal clipping).
+- Equation and control help: per-field Lucide info-icon popovers; avoid inline explanation blocks or section toggles.
 
 ## Learned Workspace Facts
 
@@ -17,5 +22,7 @@
 - Each procedure is a self-contained module under `src/procedures/<name>/`.
 - Night at Anchor 3D boat model: `/models/boat-1/boat-1.gltf` (Beneteau).
 - Night at Anchor timeline lives in top navigation alongside 3D/Schematic/Source/Lessons controls.
-- Initial Stability: hull cross-section simulator; G, B, M, K derived from hull geometry (G/B/K not manually draggable).
+- Initial Stability: analytical 2D hydrostatics (no Rapier); fixed upright metacenter M; G, B, K, and displacement computed from hull geometry (not manually draggable).
+- Total weight slider is total boat mass (kg), independent of draft/hull shape params.
+- Hull presets: choose hull type, then optional boat-class template (beam/draft/weight) applied to that type.
 - GitHub repo: `eduboat`; deployed on Railway.

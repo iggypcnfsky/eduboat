@@ -64,6 +64,7 @@ export function computeGzCurveSymmetric(
     designReferenceAreaForConfig(config),
     linearTotalKg,
     linearKeelKg,
+    config,
   )
   if (Math.abs(cg.gX) > 1e-6) return pos
 

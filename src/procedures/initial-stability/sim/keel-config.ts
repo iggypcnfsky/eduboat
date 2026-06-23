@@ -1,3 +1,10 @@
+import { getCustomHullDesign } from '../customHullStore'
+import {
+  customKeelBallastCentroid,
+  hasCustomKeelAppendage,
+  sampleCustomHullOutline,
+  type CustomHullDesign,
+} from './custom-hull'
 import {
   applyKeelDatumParts,
   buildBulbKeelOutline,
@@ -6,7 +13,9 @@ import {
   buildHullOutline,
   buildHullParts,
   buildRoundBilgeOutline,
+  hullKeelZ,
   hullKeelZParts,
+  isCustomHullPreset,
   isMultiHullPreset,
 } from './hull-presets'
 import { bodyToEarthOutline, computeSubmergedMulti } from './geometry'
@@ -31,6 +40,12 @@ export const KEEL_BALLAST_OPTIONS: KeelBallastOption[] = [
     id: 'internal',
     title: 'Internal ballast',
     description: 'Lead or iron inside the hull bilge — no external keel shape.',
+    visibleParams: [],
+  },
+  {
+    id: 'custom-keel',
+    title: 'Custom keel',
+    description: 'Lower hull region labeled in your design — same hull section, ballast can sit in the keel zone.',
     visibleParams: [],
   },
   {
@@ -65,7 +80,7 @@ export function getKeelBallastOption(id: KeelBallastId): KeelBallastOption {
 
 export function resolveKeelParams(params: HullParams, keelId: KeelBallastId): HullParams {
   const p = { ...params }
-  if (keelId === 'none' || keelId === 'internal') return p
+  if (keelId === 'none' || keelId === 'internal' || keelId === 'custom-keel') return p
 
   if (keelId === 'full-keel') {
     p.finDepth = p.finDepth > 0.1 ? p.finDepth : p.draft * 0.15
@@ -125,9 +140,141 @@ export function buildHullOutlineForConfig(config: SimConfig): Vec2[] {
   return buildHullPartsForConfig(config)[0] ?? []
 }
 
+/** Keel appendage options allowed for user-drawn hull outlines (excludes custom-keel — use when drawn). */
+export const CUSTOM_HULL_KEEL_IDS: KeelBallastId[] = KEEL_BALLAST_OPTIONS.filter((k) => k.id !== 'custom-keel').map(
+  (k) => k.id,
+)
+
+export function isCustomHullKeelAllowed(id: KeelBallastId): boolean {
+  return CUSTOM_HULL_KEEL_IDS.includes(id) || id === 'custom-keel'
+}
+
+/** Pick appendage type when loading or saving a custom hull design. */
+export function resolveCustomHullKeelBallastId(
+  design: CustomHullDesign,
+  prevKeelBallastId: KeelBallastId,
+): KeelBallastId {
+  if (hasCustomKeelAppendage(design)) return 'custom-keel'
+  if (prevKeelBallastId === 'custom-keel') return 'internal'
+  return isCustomHullKeelAllowed(prevKeelBallastId) ? prevKeelBallastId : 'internal'
+}
+
+function mirrorPortStarboard(starboard: Vec2[]): Vec2[] {
+  const port: Vec2[] = []
+  for (let i = starboard.length - 2; i >= 1; i--) {
+    port.push({ x: -starboard[i].x, z: starboard[i].z })
+  }
+  return port
+}
+
+function closeStarboardOutline(starboard: Vec2[]): Vec2[] {
+  if (starboard.length < 2) return starboard
+  const port = mirrorPortStarboard(starboard)
+  return [...starboard, ...port, { ...starboard[0] }]
+}
+
+function buildKeelAppendageStarboard(
+  keelId: KeelBallastId,
+  keelZ: number,
+  p: HullParams,
+): Vec2[] | null {
+  const finHalf = Math.max(p.keelThickness / 2, 0.05)
+  const trunkHalf = Math.max(p.keelThickness * 0.6, 0.06)
+
+  switch (keelId) {
+    case 'bulb': {
+      const tipZ = keelZ - p.finDepth
+      const bulbHalf = finHalf * 1.55
+      const bulbBottomZ = tipZ - p.finDepth * 0.1
+      return [
+        { x: 0, z: bulbBottomZ },
+        { x: bulbHalf, z: tipZ - p.finDepth * 0.06 },
+        { x: bulbHalf, z: tipZ + p.finDepth * 0.08 },
+        { x: finHalf, z: tipZ + p.finDepth * 0.22 },
+        { x: finHalf * 0.9, z: tipZ + p.finDepth * 0.55 },
+        { x: finHalf * 0.45, z: keelZ },
+        { x: 0, z: keelZ },
+      ]
+    }
+    case 'fin': {
+      const tipZ = keelZ - p.finDepth
+      return [
+        { x: 0, z: tipZ },
+        { x: finHalf, z: tipZ + p.finDepth * 0.22 },
+        { x: finHalf * 0.9, z: tipZ + p.finDepth * 0.55 },
+        { x: finHalf * 0.45, z: keelZ },
+        { x: 0, z: keelZ },
+      ]
+    }
+    case 'full-keel': {
+      const shoeZ = keelZ - Math.max(p.finDepth, 0.05)
+      const keelHalf = Math.max(p.keelThickness / 2, 0.05)
+      return [
+        { x: 0, z: shoeZ },
+        { x: keelHalf, z: shoeZ + p.finDepth * 0.35 },
+        { x: keelHalf, z: keelZ },
+        { x: 0, z: keelZ },
+      ]
+    }
+    case 'centerboard': {
+      const depth = p.finDepth
+      const boardHalf = trunkHalf * 0.45
+      return [
+        { x: 0, z: keelZ },
+        { x: trunkHalf, z: keelZ - depth * 0.12 },
+        { x: trunkHalf, z: keelZ - depth * 0.35 },
+        { x: boardHalf, z: keelZ - depth * 0.4 },
+        { x: boardHalf, z: keelZ - depth },
+        { x: 0, z: keelZ - depth },
+      ]
+    }
+    default:
+      return null
+  }
+}
+
+/** Keel appendage only — does not modify the user-drawn hull polygon. */
+export function buildCustomKeelAppendagePart(
+  hullOutline: Vec2[],
+  keelId: KeelBallastId,
+  params: HullParams,
+): Vec2[] | null {
+  if (keelId === 'none' || keelId === 'internal' || keelId === 'custom-keel') return null
+  if (hullOutline.length < 3) return null
+
+  const p = resolveKeelParams(params, keelId)
+  const keelZ = hullKeelZ(hullOutline)
+  const starboard = buildKeelAppendageStarboard(keelId, keelZ, p)
+  if (!starboard) return null
+  return closeStarboardOutline(starboard)
+}
+
+/** Part index of a parametric keel layer for custom hulls (drawn keel labels stay on the main hull). */
+export function customHullKeelPartIndex(config: SimConfig): number | null {
+  if (!isCustomHullPreset(config.presetId)) return null
+  if (
+    config.keelBallastId === 'none' ||
+    config.keelBallastId === 'internal' ||
+    config.keelBallastId === 'custom-keel'
+  ) {
+    return null
+  }
+  return 1
+}
+
 /** One or more hull sections — catamaran / trimaran return multiple demi-hulls. */
 export function buildHullPartsForConfig(config: SimConfig): Vec2[][] {
   const { presetId, keelBallastId } = config
+  if (isCustomHullPreset(presetId)) {
+    const design = getCustomHullDesign(config.customHullId)
+    if (!design) return [[]]
+    const hull = sampleCustomHullOutline(design)
+    if (keelBallastId === 'none' || keelBallastId === 'internal' || keelBallastId === 'custom-keel') {
+      return [hull]
+    }
+    const parametricKeel = buildCustomKeelAppendagePart(hull, keelBallastId, config.params)
+    return parametricKeel ? [hull, parametricKeel] : [hull]
+  }
   if (isMultiHullPreset(presetId)) {
     return buildHullParts(presetId, config.params)
   }
@@ -159,9 +306,20 @@ export function ballastBodyPosition(
   params: HullParams,
   presetId: HullPresetId,
   keelId: KeelBallastId,
+  config?: SimConfig,
 ): Vec2 {
   const p = resolveKeelParams(params, keelId)
   switch (keelId) {
+    case 'custom-keel': {
+      if (config?.customHullId) {
+        const design = getCustomHullDesign(config.customHullId)
+        if (design) {
+          const centroid = customKeelBallastCentroid(design)
+          if (centroid) return centroid
+        }
+      }
+      return { x: 0, z: p.draft * 0.15 }
+    }
     case 'fin':
     case 'bulb': {
       const tipZ = -p.finDepth
@@ -195,10 +353,15 @@ export function ballastBlockOutline(params: HullParams, keelId: KeelBallastId): 
   ]
 }
 
-/** Design waterline in body frame after keel datum (K at deepest point). Draft is measured from hull bottom; fin adds depth below. */
+/** Design waterline in body frame after keel datum (K at deepest point). */
 export function designWaterlineZ(config: SimConfig): number {
   const parts = buildHullPartsForConfig(config)
-  return config.params.draft - hullKeelZParts(parts)
+  const keelZ = hullKeelZParts(parts)
+  if (isCustomHullPreset(config.presetId) && config.customHullId) {
+    const design = getCustomHullDesign(config.customHullId)
+    if (design) return design.designWaterlineZ - keelZ
+  }
+  return config.params.draft - keelZ
 }
 
 /** Design reference area at mean draft for weight scaling (includes keel geometry). */

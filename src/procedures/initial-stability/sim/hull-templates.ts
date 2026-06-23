@@ -1,5 +1,5 @@
 import { getPreset, isMultiHullPreset } from './hull-presets'
-import { clampTotalBoatMassKg, clampVesselLengthM, defaultKeelBallastKg, defaultTotalBoatMassKg } from './weight-distribution'
+import { clampTotalBoatMassKg, clampVesselLengthM, defaultKeelBallastKg, defaultTotalBoatMassKg, weightSliderMaxKg } from './weight-distribution'
 import type { HullParams, KeelBallastId, SimConfig } from './types'
 
 export const CUSTOM_TEMPLATE_ID = 'custom'
@@ -270,7 +270,8 @@ export function applyTemplateToConfig(prev: SimConfig, template: BoatTemplate): 
   }
 
   const designMass = defaultTotalBoatMassKg(draft)
-  const totalBoatMassKg = clampTotalBoatMassKg(template.totalBoatMassKg ?? designMass)
+  /** 2D strip model: load at design displacement so equilibrium WL matches reference draft. */
+  const totalBoatMassKg = clampTotalBoatMassKg(designMass, weightSliderMaxKg({ ...draft, totalBoatMassKg: designMass }))
 
   let keelBallastKg: number
   if (keelBallastId === 'none') {

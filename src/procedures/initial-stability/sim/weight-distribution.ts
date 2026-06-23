@@ -20,11 +20,20 @@ export function clampVesselLengthM(m: number): number {
   return Math.max(MIN_VESSEL_LENGTH_M, Math.min(MAX_VESSEL_LENGTH_M, m))
 }
 
-/** Maximum total boat mass exposed in controls (30 tonnes). */
-export const MAX_TOTAL_BOAT_MASS_KG = 30_000
+/** Maximum total boat mass exposed in controls (covers largest hull design displacement at default LWL). */
+export const MAX_TOTAL_BOAT_MASS_KG = 120_000
 
-export function clampTotalBoatMassKg(kg: number): number {
-  return Math.max(0, Math.min(MAX_TOTAL_BOAT_MASS_KG, kg))
+export function clampTotalBoatMassKg(kg: number, maxKg = MAX_TOTAL_BOAT_MASS_KG): number {
+  return Math.max(0, Math.min(maxKg, kg))
+}
+
+/** Weight slider upper bound — extends past 120 t when design displacement requires it. */
+export function weightSliderMaxKg(config: SimConfig): number {
+  return Math.max(
+    MAX_TOTAL_BOAT_MASS_KG,
+    defaultTotalBoatMassKg(config),
+    config.totalBoatMassKg,
+  )
 }
 
 export function displacementMassKg(submergedArea: number): number {
@@ -71,6 +80,18 @@ export function defaultKeelBallastKg(config: SimConfig, keelId: KeelBallastId = 
   return defaultKeelBallastMassKg(refArea, keelId) * clampVesselLengthM(config.vesselLengthM)
 }
 
+/** Set total (and default keel) mass so the hull floats at its design waterline. */
+export function withDesignDisplacement(config: SimConfig): SimConfig {
+  const designMass = defaultTotalBoatMassKg(config)
+  const maxKg = weightSliderMaxKg({ ...config, totalBoatMassKg: designMass })
+  const totalBoatMassKg = clampTotalBoatMassKg(designMass, maxKg)
+  const keelBallastKg =
+    config.keelBallastId === 'none'
+      ? 0
+      : Math.min(defaultKeelBallastKg(config), totalBoatMassKg)
+  return { ...config, totalBoatMassKg, keelBallastKg }
+}
+
 /** Lightship / hull structure centroid (body frame, from K). */
 export function hullStructureKg(params: HullParams): number {
   const { draft, freeboard } = params
@@ -86,9 +107,10 @@ function ballastKgPosition(
   presetId: HullPresetId,
   params: HullParams,
   keelId: KeelBallastId,
+  config?: SimConfig,
 ): number {
   const id = keelId === 'none' ? 'internal' : keelId
-  return ballastBodyPosition(params, presetId, id).z
+  return ballastBodyPosition(params, presetId, id, config).z
 }
 
 /**
@@ -102,6 +124,7 @@ export function computeCenterOfGravity(
   referenceArea: number,
   totalMassKg: number,
   keelBallastMassKg: number,
+  config?: SimConfig,
 ): CenterOfGravityResult {
   const displacementKg = displacementMassKg(referenceArea)
   const keelMass = Math.min(Math.max(0, keelBallastMassKg), totalMassKg)
@@ -112,7 +135,7 @@ export function computeCenterOfGravity(
   if (keelMass < 1e-3) {
     gZ = kgHull
   } else {
-    const kgBallast = ballastKgPosition(presetId, params, keelId)
+    const kgBallast = ballastKgPosition(presetId, params, keelId, config)
     gZ = (hullMass * kgHull + keelMass * kgBallast) / totalMassKg
   }
 

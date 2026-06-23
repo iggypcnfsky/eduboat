@@ -13,6 +13,7 @@ export function computeEquilibriumArea(config: SimConfig): number {
     refArea,
     linearTotalKg,
     linearKeelKg,
+    config,
   )
   return cg.totalMassKg / RHO_SEAWATER
 }
